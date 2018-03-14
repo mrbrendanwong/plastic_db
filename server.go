@@ -23,11 +23,28 @@ import (
 	"encoding/json"
 	"encoding/gob"
 	"strconv"
+	"fmt"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // ERRORS
 ////////////////////////////////////////////////////////////////////////////////
+
+// Contains ID
+type IDAlreadyRegisteredError string
+
+func (e IDAlreadyRegisteredError) Error() string {
+	return fmt.Sprintf("Server: ID already registered [%s]", string(e))
+}
+
+
+// Contains node address
+type RegistrationError string
+
+func(e RegistrationError) Error() string {
+	return fmt.Sprintf("Server: Failure to register node [%s]", string(e))
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
@@ -98,14 +115,13 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 
 	// Temporary method for assigning an ID
 	id := strconv.Itoa(nextID)
-	
+
 	// Increment ID
 	nextID++
 
 	// Define errors
 	if _, exists := allNodes.nodes[id]; exists {
-		outLog.Println("Node with ID already exists")
-		return nil
+		return IDAlreadyRegisteredError(id);
 	}
 
 	// Check if this is the first node; if so set coordinator
