@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 	"encoding/json"
+	"encoding/gob"
+	"strconv"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -42,25 +44,32 @@ var  (
 var (
 	allNodes 			AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	currentCoordinator 	Node
+	nextID 				int = 0
 )
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
-
-// Node Settings
-type NodeSettings struct {
-	HeartBeat 			uint32 "json:heartbeat"
-	MajorityThreshold 	float32 "json:majority-threshold"
-}
-
 // Configuration
 type Config struct {
 	ServerAddress	string 			`json:"server-ip-port"`
 	NodeSettings 	NodeSettings 	`json:"node-settings"`
 }
 
+type RegistrationPackage struct {
+	Settings 		NodeSettings
+	ID 				string
+	IsCoordinator 	bool
+}
+
+// Node Settings
+type NodeSettings struct {
+	HeartBeat 			uint32 `json:"heartbeat"`
+	MajorityThreshold 	float32 `json:"majority-threshold"`
+}
+
 // Node - a node of the network
 type Node struct {
+	ID 				string
 	IsCoordinator 	bool
 	Address			net.Addr
 }
@@ -71,6 +80,10 @@ type AllNodes struct {
 	nodes map[string]*Node
 }
 
+type NodeInfo struct {
+	Address				net.Addr
+}
+
 // For RPC calls
 type KVServer int
 
@@ -79,20 +92,56 @@ type KVServer int
 ////////////////////////////////////////////////////////////////////////////////
 
 // Register a node into the KV node network
-func (s *KVServer) RegisterNode() {
-	return
+func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage) error {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// Temporary method for assigning an ID
+	id := strconv.Itoa(nextID)
+	
+	// Increment ID
+	nextID++
+
+	// Define errors
+	if _, exists := allNodes.nodes[id]; exists {
+		outLog.Println("Node with ID already exists")
+		return nil
+	}
+
+	// Check if this is the first node; if so set coordinator
+	isCoordinator := false
+	if len(allNodes.nodes) == 0 {
+		isCoordinator = true
+	}
+
+	// Set node information and add to map
+	allNodes.nodes[id] = &Node{
+		IsCoordinator: 	isCoordinator,
+		Address: 		nodeInfo.Address}
+
+	// Set current coordinator
+	currentCoordinator = *allNodes.nodes[id]
+
+	// Reply
+	*settings = RegistrationPackage{Settings: config.NodeSettings,
+									ID: id,
+									IsCoordinator: isCoordinator}
+	
+	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
+
+	return nil
 }
 
 // Elect a new coordinator node - elect a new coordinator based on the network majority vote
-func (s *KVServer) ElectCoordinator() {
-	return
-}
+//func (s *KVServer) ElectCoordinator() error {
+//	return nil
+//}
 
 // Get all nodes currently in the network
 // *Useful if a heartbeat connection between miner dies, but the network is still online
-func (s *KVServer) GetAllNodes() {
-	return
-}
+//func (s *KVServer) GetAllNodes() error {
+//	return nil
+//}
 
 // Set coordinator - set the first node of the network as a coordinator
 func SetCoordinator() {
@@ -120,6 +169,8 @@ func readConfigOrDie(path string) {
 }
 
 func main() {
+	gob.Register(&net.TCPAddr{})
+	
 	path := flag.String("c", "", "Path to the JSON config")
 	flag.Parse()
 

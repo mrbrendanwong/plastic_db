@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/rpc"
 	"sync"
+	"encoding/gob"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -35,35 +36,47 @@ var (
 
 // Variable related to the node
 var (
+	LocalAddr 		net.Addr
 	Server 			*rpc.Client
-
 	allNodes 		AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	isCoordinator 	bool
+	Settings 		NodeSettings
+	ID 				string
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
+// Registration package
+type RegistrationPackage struct {
+	Settings 		NodeSettings
+	ID 				string
+	IsCoordinator 	bool
+}
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat 			uint32 "json:heartbeat"
-	MajorityThreshold 	float32 "json:majority-threshold"
+	HeartBeat 			uint32 `json:"heartbeat"`
+	MajorityThreshold 	float32 `json:"majority-threshold"`
 }
 
 // Node Settings
 type Node struct {
+	ID 					string
 	IsCoordinator 		bool
 	Address				net.Addr
 	RecentHeartbeat 	int64
 	NodeConn 			*rpc.Client
-
 }
 
 // All Nodes
 type AllNodes struct {
 	sync.RWMutex
 	nodes map[string]*Node
+}
+
+type NodeInfo struct {
+	Address				net.Addr
 }
 
 // For RPC Calls
@@ -84,6 +97,7 @@ func ConnectServer(serverAddr string) {
 	}
 	localAddr = fmt.Sprintf("%s%s", localAddr, ":0")
 	ln, err := net.Listen("tcp", localAddr)
+	LocalAddr = ln.Addr()
 
 	// Connect to server
 	outLog.Printf("Connect to server at %s...", serverAddr)
@@ -95,8 +109,12 @@ func ConnectServer(serverAddr string) {
 	outLog.Printf("Successfully connected to server at %s!", serverAddr)
 
 	// Register node to server
-
-	// Store node settings from server
+	err = RegisterNode()
+	if err != nil {
+		errLog.Println("Failed to register node")
+		return
+	}
+	outLog.Println("Successfully node")
 
 	// Listen for other incoming nodes
 	kvNode := new(KVNode)
@@ -111,18 +129,43 @@ func ConnectServer(serverAddr string) {
 	return
 }
 
-func RegisterNode(){
-	return
+func RegisterNode() (err error) {
+	var regInfo RegistrationPackage
+
+	nodeInfo := NodeInfo{Address: LocalAddr}
+	err = Server.Call("KVServer.RegisterNode", nodeInfo, &regInfo)
+	if err != nil {
+		outLog.Println("Something bad happened:", err)
+		return err
+	}
+
+	// Store node settings from server
+	Settings = regInfo.Settings
+	ID = regInfo.ID
+	isCoordinator = regInfo.IsCoordinator
+
+	if isCoordinator {
+		outLog.Printf("Received node ID %s and this node is the coordinator!", ID)
+	} else {
+		outLog.Printf("Received node ID %s and this node is a network node", ID)
+	}
+
+
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// COORDINATOR <-> NODE FUNCTION
+// NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func AddNodeToNetwork(){
-	return
-}
-
 func ConnectToCoordinator(){
+	return
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// COORDINATOR FUNCTION
+////////////////////////////////////////////////////////////////////////////////
+
+func AddNodeToNetwork(){
 	return
 }
 
@@ -142,6 +185,8 @@ func sendHeartBeats(){
 ////////////////////////////////////////////////////////////////////////////////
 
 func main() {
+	gob.Register(&net.TCPAddr{})
+
 	args := os.Args
 	if len(args) != 2 {
 		fmt.Println("Usage: go run node.go [server ip:port]")
