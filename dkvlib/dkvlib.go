@@ -8,53 +8,34 @@ package dkvapi
 // TYPES, VARIABLES, CONSTANTS
 ///////////////////////////////////////////////////////////////////////////
 
-type ClientNode struct {
-}
-
-func newClient() *ClientNode {
-	return &ClientNode{}
-}
-
-///////////////////////////////////////////////////////////////////////////
-// CLIENT-SERVER FUNCTIONS
-///////////////////////////////////////////////////////////////////////////
-
-// Connects to server and creates an RPC connection
-func (c *ClientNode) connectToServer() {
-	//TODO
-}
-
-// Gets address of coordinator from server
-// Makes RPC call to KVServer
-func (c *ClientNode) getCoordinator() {
-	//TODO
+// Represent a Coordinator node
+type CNode interface {
+	Read(key string) (string, error)
+	Write(key, value string) error
+	Update(key, value string) error
+	Delete(key string) error
 }
 
 ///////////////////////////////////////////////////////////////////////////
 // CLIENT-COORDINATOR FUNCTIONS
 ///////////////////////////////////////////////////////////////////////////
 
-// Connects to coordinator through RPC, maintains heartbeat connection
-func (c *ClientNode) connectToCoordinator() {
-	//TODO
-}
-
 // Get value of key
-func (c *ClientNode) read(key string) (string, error) {
+func (c *CNode) Read(key string) (string, error) {
 	// TODO
 }
 
 // Write value to key
-func (c *ClientNode) write(key, value string) error {
+func (c *CNode) Write(key, value string) error {
 	//TODO
 }
 
 // Update value of key
-func (c *ClientNode) update(key, value string) error {
+func (c *CNode) Update(key, value string) error {
 	//TODO
 }
 
 // Delete key-value pair
-func (c *ClientNode) delete(key, value string) error {
+func (c *CNode) Delete(key, value string) error {
 	//TODO
 }
