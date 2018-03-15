@@ -109,24 +109,23 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 		return nil
 	}
 
-	// Check if this is the first node; if so set coordinator
-	isCoordinator := false
-	if len(allNodes.nodes) == 0 {
-		isCoordinator = true
-	}
-
 	// Set node information and add to map
 	allNodes.nodes[id] = &Node{
-		IsCoordinator: isCoordinator,
-		Address:       nodeInfo.Address}
-
-	// Set current coordinator
-	currentCoordinator = *allNodes.nodes[id]
+		IsCoordinator: false,
+		Address:       nodeInfo.Address,
+	}
+	// Check if this is the first node; if so set iscoordinator
+	// and set current coordinator
+	if len(allNodes.nodes) == 1 {
+		allNodes.nodes[id].IsCoordinator = true
+		// Set current coordinator
+		currentCoordinator = *allNodes.nodes[id]
+	}
 
 	// Reply
 	*settings = RegistrationPackage{Settings: config.NodeSettings,
 		ID:            id,
-		IsCoordinator: isCoordinator}
+		IsCoordinator: allNodes.nodes[id].IsCoordinator}
 
 	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
 
