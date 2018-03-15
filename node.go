@@ -10,19 +10,18 @@ $ go run [server ip:port]
 package main
 
 import (
-	"os"
+	"encoding/gob"
 	"fmt"
 	"log"
 	"net"
 	"net/rpc"
+	"os"
 	"sync"
-	"encoding/gob"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // ERRORS
 ////////////////////////////////////////////////////////////////////////////////
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
@@ -30,18 +29,18 @@ import (
 
 // Variables related to general node function
 var (
-	errLog		*log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog		*log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
 )
 
 // Variable related to the node
 var (
-	LocalAddr 		net.Addr
-	Server 			*rpc.Client
-	allNodes 		AllNodes = AllNodes{nodes: make(map[string]*Node)}
-	isCoordinator 	bool
-	Settings 		NodeSettings
-	ID 				string
+	LocalAddr     net.Addr
+	Server        *rpc.Client
+	allNodes      AllNodes = AllNodes{nodes: make(map[string]*Node)}
+	isCoordinator bool
+	Settings      NodeSettings
+	ID            string
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -49,24 +48,24 @@ var (
 ////////////////////////////////////////////////////////////////////////////////
 // Registration package
 type RegistrationPackage struct {
-	Settings 		NodeSettings
-	ID 				string
-	IsCoordinator 	bool
+	Settings      NodeSettings
+	ID            string
+	IsCoordinator bool
 }
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat 			uint32 `json:"heartbeat"`
-	MajorityThreshold 	float32 `json:"majority-threshold"`
+	HeartBeat         uint32  `json:"heartbeat"`
+	MajorityThreshold float32 `json:"majority-threshold"`
 }
 
 // Node Settings
 type Node struct {
-	ID 					string
-	IsCoordinator 		bool
-	Address				net.Addr
-	RecentHeartbeat 	int64
-	NodeConn 			*rpc.Client
+	ID              string
+	IsCoordinator   bool
+	Address         net.Addr
+	RecentHeartbeat int64
+	NodeConn        *rpc.Client
 }
 
 // All Nodes
@@ -76,7 +75,7 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
-	Address				net.Addr
+	Address net.Addr
 }
 
 // For RPC Calls
@@ -114,7 +113,7 @@ func ConnectServer(serverAddr string) {
 		errLog.Println("Failed to register node")
 		return
 	}
-	outLog.Println("Successfully node")
+	outLog.Println("Successfully registered node")
 
 	// Listen for other incoming nodes
 	kvNode := new(KVNode)
@@ -150,14 +149,13 @@ func RegisterNode() (err error) {
 		outLog.Printf("Received node ID %s and this node is a network node", ID)
 	}
 
-
 	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func ConnectToCoordinator(){
+func ConnectToCoordinator() {
 	return
 }
 
@@ -165,18 +163,18 @@ func ConnectToCoordinator(){
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
 
-func AddNodeToNetwork(){
+func AddNodeToNetwork() {
 	return
 }
 
-func CreatePrimaryBackup(){
+func CreatePrimaryBackup() {
 	return
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func sendHeartBeats(){
+func sendHeartBeats() {
 	return
 }
 

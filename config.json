@@ -1,5 +1,5 @@
 {
-	"server-ip-port": "198.162.33.54:12345",
+	"server-ip-port": "127.0.0.1:12345",
 	"node-settings": {
 		"heartbeat": 1000,
 		"majority-threshold": 0.50
