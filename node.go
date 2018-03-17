@@ -115,6 +115,9 @@ func ConnectServer(serverAddr string) {
 	}
 	outLog.Println("Successfully registered node")
 
+	// Connect to existing nodes
+	GetNodes()
+
 	// Listen for other incoming nodes
 	kvNode := new(KVNode)
 	node := rpc.NewServer()
@@ -147,6 +150,22 @@ func RegisterNode() (err error) {
 		outLog.Printf("Received node ID %s and this node is the coordinator!", ID)
 	} else {
 		outLog.Printf("Received node ID %s and this node is a network node", ID)
+	}
+
+	return nil
+}
+
+func GetNodes() (err error){
+	var addrSet []net.Addr
+
+	outLog.Println("Checking for existing nodes")
+	err = Server.Call("KVServer.GetAllNodes", 0, &addrSet)
+	if err != nil {
+		outLog.Println("Error getting existing nodes from server")
+	} else {
+		for _, addr := range addrSet{
+			outLog.Println(addr.String())
+		}
 	}
 
 	return nil

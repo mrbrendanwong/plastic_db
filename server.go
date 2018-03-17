@@ -139,10 +139,22 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 
 // GetAllNodes currently in the network
 // *Useful if a heartbeat connection between nodes dies, but the network is still online
-func (s *KVServer) GetAllNodes(msg int, response *map[string]*Node) error {
+func (s *KVServer) GetAllNodes(msg int, response *[]net.Addr) error {
+	//allNodes.RLock()
+	//*response = allNodes.nodes
+	//allNodes.RUnlock()
+	//return nil
+	outLog.Println("Getting all nodes...")
 	allNodes.RLock()
-	*response = allNodes.nodes
-	allNodes.RUnlock()
+	defer allNodes.RUnlock()
+
+	nodesAddrs := make([]net.Addr, 0 , len(allNodes.nodes) - 1)
+
+	for _, addr := range allNodes.nodes{
+		nodesAddrs = append(nodesAddrs, addr.Address)
+	}
+
+	*response = nodesAddrs
 	return nil
 }
 
