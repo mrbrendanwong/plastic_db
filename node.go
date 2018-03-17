@@ -181,6 +181,19 @@ func ConnectToCoordinator() {
 	return
 }
 
+// Check for heartbeat timeouts from other nodes
+func MonitorHeartBeats(addr string){
+	for{
+		time.Sleep(time.Duration(Settings.HeartBeat + 1000) * time.Millisecond)
+		allNodes.RLock()
+		if time.Now().UnixNano() - allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat) * int64(time.Millisecond){
+			outLog.Println("Connection with ", addr, " timed out.")
+			//TODO: report node failure
+		}
+		allNodes.RUnlock()
+	}
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
@@ -226,6 +239,7 @@ func ConnectNode(node *Node) error {
 	go sendHeartBeats(nodeConn)
 
 	//TODO: check for timeouts
+	go MonitorHeartBeats(nodeAddr.String())
 	return nil
 }
 
@@ -258,23 +272,26 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 
 	go sendHeartBeats(conn)
 
+	go MonitorHeartBeats(addr.String())
+
 	return nil
 }
 
+// send heartbeats to passed node
 func sendHeartBeats(conn *rpc.Client) error {
-	outLog.Println("Sending heartbeats...")
 	args := &NodeInfo{Address: LocalAddr}
 	var reply int
 	for{
 		err := conn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
 		if err != nil {
-			outLog.Println("Error sending heartbeats")
+			//outLog.Println("Error sending heartbeats")
 			//return err
 		}
-		time.Sleep(time.Millisecond * 5000)
+		time.Sleep(time.Duration(Settings.HeartBeat)* time.Millisecond)
 	}
 }
 
+// Log the most recent heartbeat received
 func (n KVNode)ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
 	addr := args.Address
 
