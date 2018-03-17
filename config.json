@@ -1,7 +1,7 @@
 {
 	"server-ip-port": "127.0.0.1:12345",
 	"node-settings": {
-		"heartbeat": 1000,
+		"heartbeat": 5000,
 		"majority-threshold": 0.50
 	}
 }
