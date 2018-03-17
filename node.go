@@ -187,8 +187,16 @@ func MonitorHeartBeats(addr string){
 		time.Sleep(time.Duration(Settings.HeartBeat + 1000) * time.Millisecond)
 		allNodes.RLock()
 		if time.Now().UnixNano() - allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat) * int64(time.Millisecond){
-			outLog.Println("Connection with ", addr, " timed out.")
-			//TODO: report node failure
+			if(isCoordinator){
+				outLog.Println("Connection with ", addr, " timed out.")
+				//TODO: report coordinator - node failure
+			} else if(allNodes.nodes[addr].IsCoordinator){
+				outLog.Println("Connection with coordinator timed out.")
+				//TODO: handle coordinator failure
+			} else{
+				outLog.Println("Connection with ", addr, " timed out.")
+				//TODO: handle node - node failure
+			}
 		}
 		allNodes.RUnlock()
 	}
