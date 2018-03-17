@@ -17,6 +17,7 @@ import (
 	"net/rpc"
 	"os"
 	"sync"
+	"time"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -75,6 +76,7 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
+	ID		string
 	Address net.Addr
 }
 
@@ -155,19 +157,20 @@ func RegisterNode() (err error) {
 	return nil
 }
 
+// Retreives all nodes existing in network
 func GetNodes() (err error){
-	var addrSet []net.Addr
+	var nodeSet map[string]*Node
 
-	outLog.Println("Checking for existing nodes")
-	err = Server.Call("KVServer.GetAllNodes", 0, &addrSet)
+	err = Server.Call("KVServer.GetAllNodes", 0, &nodeSet)
 	if err != nil {
 		outLog.Println("Error getting existing nodes from server")
 	} else {
-		for _, addr := range addrSet{
-			outLog.Println(addr.String())
+		for _, node := range nodeSet{
+			if node.Address.String() != LocalAddr.String() {
+				ConnectNode(node)
+			}
 		}
 	}
-
 	return nil
 }
 
@@ -193,6 +196,67 @@ func CreatePrimaryBackup() {
 ////////////////////////////////////////////////////////////////////////////////
 // NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+// Connect to given node
+func ConnectNode(node *Node) error {
+	outLog.Println("Attempting to connected to node...", node.Address.String())
+	nodeAddr := node.Address
+	nodeConn, err := rpc.Dial("tcp", nodeAddr.String())
+	if err != nil {
+		outLog.Println("Could not reach node ", nodeAddr.String())
+		return err
+	}
+
+	// Set up reverse connection
+	args := &NodeInfo{Address: nodeAddr}
+	var reply int
+	err = nodeConn.Call("KVNode.RegisterNode", args, &reply)
+	if err != nil {
+		outLog.Println("Could not initate connection with node: ", nodeAddr.String())
+		return err
+	}
+
+	// Add this new node to node map
+	allNodes.Lock()
+	defer allNodes.Unlock()
+	allNodes.nodes[nodeAddr.String()] = node
+
+	outLog.Println("Successfully connected to ", nodeAddr.String())
+
+	// TODO: send heartbeats
+
+	// TODO: receive heartbeats
+	return nil
+}
+
+// Open reverse connection through RPC
+func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
+	addr := args.Address
+	id := args.ID
+
+	outLog.Println("Attempting to establish return connection")
+	conn, err := rpc.Dial("tcp", addr.String())
+
+	if err != nil {
+		outLog.Println("Return connection with node failed: ", addr.String())
+		return err
+	}
+
+	// Add node to node map
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	allNodes.nodes[addr.String()] = &Node{
+		      id,
+		      false,
+		      addr,
+		      time.Now().UnixNano(),
+		      conn,
+	}
+
+	outLog.Println("Return connection with node succeeded: ", addr.String())
+	return nil
+}
+
 func sendHeartBeats() {
 	return
 }
