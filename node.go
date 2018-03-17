@@ -80,6 +80,11 @@ type NodeInfo struct {
 	Address net.Addr
 }
 
+type FailureInfo struct {
+	Failed		net.Addr
+	Reporter	net.Addr
+}
+
 // For RPC Calls
 type KVNode int
 
@@ -174,6 +179,37 @@ func GetNodes() (err error){
 	return nil
 }
 
+func ReportNodeFailure(node *Node){
+	// If connection with server has failed, reconnect
+
+	info := &FailureInfo{
+		Failed: node.Address,
+		Reporter: LocalAddr,
+	}
+	var reply int
+	err := Server.Call("KVServer.ReportNodeFailure", &info, &reply)
+	if err != nil {
+		outLog.Println("Error reporting failure of node ", node.Address)
+	}
+}
+
+func ReportCoordinatorFailure(node *Node){
+	// If connection with server has failed, reconnect
+
+	info := &FailureInfo{
+		Failed: node.Address,
+		Reporter: LocalAddr,
+	}
+
+	var reply int
+	err := Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
+	if err != nil {
+		outLog.Println("Error reporting failure of coordinator ", node.Address)
+	}
+}
+
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
@@ -190,12 +226,15 @@ func MonitorHeartBeats(addr string){
 			if(isCoordinator){
 				outLog.Println("Connection with ", addr, " timed out.")
 				//TODO: report coordinator - node failure
+				ReportNodeFailure(allNodes.nodes[addr])
 			} else if(allNodes.nodes[addr].IsCoordinator){
 				outLog.Println("Connection with coordinator timed out.")
 				//TODO: handle coordinator failure
+				ReportCoordinatorFailure(allNodes.nodes[addr])
 			} else{
 				outLog.Println("Connection with ", addr, " timed out.")
 				//TODO: handle node - node failure
+				ReportNodeFailure(allNodes.nodes[addr])
 			}
 		}
 		allNodes.RUnlock()

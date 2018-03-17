@@ -82,7 +82,13 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
+	ID 		string
 	Address net.Addr
+}
+
+type FailureInfo struct{
+	Failed		net.Addr
+	Reporter	net.Addr
 }
 
 // For RPC calls
@@ -154,6 +160,21 @@ func SetCoordinator() {
 // Send a Node to the coordinator to be set into the network
 func SendToCoordinator() {
 	return
+}
+
+// Report Failure
+func (s KVServer) ReportNodeFailure(info *FailureInfo, _unused *int) error {
+	failedNode := info.Failed
+	reporterNode := info.Reporter
+	outLog.Println("Reported failure of ", failedNode, " received by ", reporterNode)
+
+	return nil
+}
+
+
+func (s KVServer) ReportCoordinatorFailure(node *FailureInfo, _unused *int) error {
+	outLog.Println("Reported failure of coordinator ", node.Failed, " received from ", node.Reporter)
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
