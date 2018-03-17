@@ -207,7 +207,7 @@ func ConnectNode(node *Node) error {
 	}
 
 	// Set up reverse connection
-	args := &NodeInfo{Address: nodeAddr}
+	args := &NodeInfo{Address: LocalAddr}
 	var reply int
 	err = nodeConn.Call("KVNode.RegisterNode", args, &reply)
 	if err != nil {
@@ -222,9 +222,10 @@ func ConnectNode(node *Node) error {
 
 	outLog.Println("Successfully connected to ", nodeAddr.String())
 
-	// TODO: send heartbeats
+	// send heartbeats
+	go sendHeartBeats(nodeConn)
 
-	// TODO: receive heartbeats
+	//TODO: check for timeouts
 	return nil
 }
 
@@ -254,11 +255,40 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 	}
 
 	outLog.Println("Return connection with node succeeded: ", addr.String())
+
+	go sendHeartBeats(conn)
+
 	return nil
 }
 
-func sendHeartBeats() {
-	return
+func sendHeartBeats(conn *rpc.Client) error {
+	outLog.Println("Sending heartbeats...")
+	args := &NodeInfo{Address: LocalAddr}
+	var reply int
+	for{
+		err := conn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
+		if err != nil {
+			outLog.Println("Error sending heartbeats")
+			//return err
+		}
+		time.Sleep(time.Millisecond * 5000)
+	}
+}
+
+func (n KVNode)ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
+	addr := args.Address
+
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	if _, ok := allNodes.nodes[addr.String()]; !ok {
+		return err
+	}
+	allNodes.nodes[addr.String()].RecentHeartbeat = time.Now().UnixNano()
+
+
+	outLog.Println("Heartbeats received by ", addr.String())
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
