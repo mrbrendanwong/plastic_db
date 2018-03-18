@@ -23,31 +23,32 @@ import (
 	"strconv"
 	"sync"
 	"time"
-<<<<<<< HEAD
-	"encoding/json"
-	"encoding/gob"
-	"strconv"
 	"fmt"
-=======
->>>>>>> dev
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // ERRORS
 ////////////////////////////////////////////////////////////////////////////////
 
-// Contains ID
+// ID has already been assigned in the server
 type IDAlreadyRegisteredError string
 
 func (e IDAlreadyRegisteredError) Error() string {
 	return fmt.Sprintf("Server: ID already registered [%s]", string(e))
 }
 
+// Address already registered in the server
+type AddressAlreadyRegisteredError string 
 
-// Contains node address
+func (e AddressAlreadyRegisteredError) Error() string {
+	return fmt.Sprintf("Server: Address already registered [%s]", string(e))
+}
+
+
+// Misc. registration error
 type RegistrationError string
 
-func(e RegistrationError) Error() string {
+func (e RegistrationError) Error() string {
 	return fmt.Sprintf("Server: Failure to register node [%s]", string(e))
 }
 
@@ -87,8 +88,11 @@ type RegistrationPackage struct {
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat         uint32  `json:"heartbeat"`
-	MajorityThreshold float32 `json:"majority-threshold"`
+	HeartBeat         		uint32  `json:"heartbeat"`
+	VotingWait 				uint32 	`json:"voting-wait"`
+	ElectionWait 			uint32 	`json:"election-wait"`
+	ServerUpdateInterval 	uint32 	`json:"server-update-interval"`
+	MajorityThreshold 		float32 `json:"majority-threshold"`
 }
 
 // Node - a node of the network
@@ -150,6 +154,7 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 		IsCoordinator: allNodes.nodes[id].IsCoordinator}
 
 	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
+	outLog.Printf("Gave node ID %s\n", id)
 
 	return nil
 }

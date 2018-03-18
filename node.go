@@ -35,7 +35,7 @@ func (e InvalidKeyError) Error() string {
 type DisconnectedServerError string
 
 func (e DisconnectedServerError) Error() string {
-	return fmt.Sprintf("Node: Cannot connect to server [%s]", string(e));
+	return fmt.Sprintf("Node: Cannot connect to server [%s]", string(e))
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -70,8 +70,11 @@ type RegistrationPackage struct {
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat         uint32  `json:"heartbeat"`
-	MajorityThreshold float32 `json:"majority-threshold"`
+	HeartBeat         		uint32  `json:"heartbeat"`
+	VotingWait 				uint32 	`json:"voting-wait"`
+	ElectionWait 			uint32 	`json:"election-wait"`
+	ServerUpdateInterval 	uint32 	`json:"server-update-interval"`
+	MajorityThreshold 		float32 `json:"majority-threshold"`
 }
 
 // Node Settings
