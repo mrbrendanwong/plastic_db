@@ -3,7 +3,9 @@ package dkvlib
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/rpc"
+	"os"
 )
 
 ///////////////////////////////////////////////////////////////////////////
@@ -13,6 +15,11 @@ import (
 ///////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ///////////////////////////////////////////////////////////////////////////
+
+var (
+	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+)
 
 // Represent a Coordinator node
 type CNodeConn interface {
@@ -56,6 +63,21 @@ func (c CNode) Read(key string) (string, error) {
 func (c CNode) Write(key, value string) error {
 	fmt.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 	//TODO
+	args := struct {
+		Key   string
+		Value string
+	}{
+		key,
+		value,
+	}
+	var reply int
+	outLog.Printf("Sending write to coordinator")
+	err := c.Coordinator.Call("KVNode.Write", &args, &reply)
+	if err != nil {
+		outLog.Println("Could not connect to coordinator: ", err)
+		return err
+	}
+	outLog.Printf("Successfully completed write to coordinator")
 	return nil
 }
 

@@ -42,6 +42,7 @@ var (
 	isCoordinator bool
 	Settings      NodeSettings
 	ID            string
+	KVStore       map[string]string
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,6 +53,11 @@ type RegistrationPackage struct {
 	Settings      NodeSettings
 	ID            string
 	IsCoordinator bool
+}
+
+type WriteRequest struct {
+	Key   string
+	Value string
 }
 
 // Node Settings
@@ -76,7 +82,7 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
-	ID		string
+	ID      string
 	Address net.Addr
 }
 
@@ -158,14 +164,14 @@ func RegisterNode() (err error) {
 }
 
 // Retreives all nodes existing in network
-func GetNodes() (err error){
+func GetNodes() (err error) {
 	var nodeSet map[string]*Node
 
 	err = Server.Call("KVServer.GetAllNodes", 0, &nodeSet)
 	if err != nil {
 		outLog.Println("Error getting existing nodes from server")
 	} else {
-		for _, node := range nodeSet{
+		for _, node := range nodeSet {
 			if node.Address.String() != LocalAddr.String() {
 				ConnectNode(node)
 			}
@@ -182,18 +188,18 @@ func ConnectToCoordinator() {
 }
 
 // Check for heartbeat timeouts from other nodes
-func MonitorHeartBeats(addr string){
-	for{
-		time.Sleep(time.Duration(Settings.HeartBeat + 1000) * time.Millisecond)
+func MonitorHeartBeats(addr string) {
+	for {
+		time.Sleep(time.Duration(Settings.HeartBeat+1000) * time.Millisecond)
 		allNodes.RLock()
-		if time.Now().UnixNano() - allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat) * int64(time.Millisecond){
-			if(isCoordinator){
+		if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
+			if isCoordinator {
 				outLog.Println("Connection with ", addr, " timed out.")
 				//TODO: report coordinator - node failure
-			} else if(allNodes.nodes[addr].IsCoordinator){
+			} else if allNodes.nodes[addr].IsCoordinator {
 				outLog.Println("Connection with coordinator timed out.")
 				//TODO: handle coordinator failure
-			} else{
+			} else {
 				outLog.Println("Connection with ", addr, " timed out.")
 				//TODO: handle node - node failure
 			}
@@ -212,6 +218,18 @@ func AddNodeToNetwork() {
 
 func CreatePrimaryBackup() {
 	return
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// COORDINATOR NODE <-> NODE FUNCTION
+////////////////////////////////////////////////////////////////////////////////
+func (n KVNode) Write(args *WriteRequest, _unused *int) error {
+	outLog.Println("Writing to KVStore")
+	key := args.Key
+	value := args.Value
+	KVStore[key] = value
+	outLog.Printf("(%s, %s) is written to the KVSTORE\n", key, KVStore[key])
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -252,7 +270,7 @@ func ConnectNode(node *Node) error {
 }
 
 // Open reverse connection through RPC
-func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
+func (n KVNode) RegisterNode(args *NodeInfo, _unused *int) error {
 	addr := args.Address
 	id := args.ID
 
@@ -269,11 +287,11 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 	defer allNodes.Unlock()
 
 	allNodes.nodes[addr.String()] = &Node{
-		      id,
-		      false,
-		      addr,
-		      time.Now().UnixNano(),
-		      conn,
+		id,
+		false,
+		addr,
+		time.Now().UnixNano(),
+		conn,
 	}
 
 	outLog.Println("Return connection with node succeeded: ", addr.String())
@@ -289,18 +307,18 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 func sendHeartBeats(conn *rpc.Client) error {
 	args := &NodeInfo{Address: LocalAddr}
 	var reply int
-	for{
+	for {
 		err := conn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
 		if err != nil {
 			//outLog.Println("Error sending heartbeats")
 			//return err
 		}
-		time.Sleep(time.Duration(Settings.HeartBeat)* time.Millisecond)
+		time.Sleep(time.Duration(Settings.HeartBeat) * time.Millisecond)
 	}
 }
 
 // Log the most recent heartbeat received
-func (n KVNode)ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
+func (n KVNode) ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
 	addr := args.Address
 
 	allNodes.Lock()
@@ -310,7 +328,6 @@ func (n KVNode)ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
 		return err
 	}
 	allNodes.nodes[addr.String()].RecentHeartbeat = time.Now().UnixNano()
-
 
 	outLog.Println("Heartbeats received by ", addr.String())
 	return nil
@@ -330,7 +347,7 @@ func main() {
 	}
 
 	serverAddr := args[1]
-
+	KVStore = make(map[string]string)
 	ConnectServer(serverAddr)
 
 }

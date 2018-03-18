@@ -91,7 +91,7 @@ func main() {
 
 	coordinator, error := dkvlib.OpenCoordinatorConn(coordinatorNodeAddr.String())
 	if error != nil {
-		outLog.Println("Couldn't connect to coordinator:", error)
+		outLog.Println("Couldn't connect to dkvlib:", error)
 	}
 	// Call functions on API
 	coordinator.Write("a", "5")
