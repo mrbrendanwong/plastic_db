@@ -16,6 +16,8 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+
+	"./dkvlib"
 )
 
 var (
@@ -85,8 +87,13 @@ func main() {
 	coordinatorNodeAddr := response
 	outLog.Printf("Coordinator address received: %v\n", coordinatorNodeAddr)
 
-	// TODO Connect to coordinator
+	// Connect to coordinator API
 
-	// TODO Send database requests to Coordinator
+	coordinator, error := dkvlib.OpenCoordinatorConn(coordinatorNodeAddr.String())
+	if error != nil {
+		outLog.Println("Couldn't connect to coordinator:", error)
+	}
+	// Call functions on API
+	coordinator.Write("a", "5")
 
 }
