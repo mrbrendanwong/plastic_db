@@ -42,12 +42,17 @@ var (
 	isCoordinator bool
 	Settings      NodeSettings
 	ID            string
-	KVStore       map[string]string
+	kvstore       KVStore = KVStore{store: make(map[string]string)}
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
+type KVStore struct {
+	sync.RWMutex
+	store map[string]string
+}
+
 // Registration package
 type RegistrationPackage struct {
 	Settings      NodeSettings
@@ -227,8 +232,10 @@ func (n KVNode) Write(args *WriteRequest, _unused *int) error {
 	outLog.Println("Writing to KVStore")
 	key := args.Key
 	value := args.Value
-	KVStore[key] = value
-	outLog.Printf("(%s, %s) is written to the KVSTORE\n", key, KVStore[key])
+	kvstore.Lock()
+	kvstore.store[key] = value
+	outLog.Printf("(%s, %s) is written to the KVSTORE\n", key, kvstore.store[key])
+	kvstore.Unlock()
 	return nil
 }
 
@@ -347,7 +354,6 @@ func main() {
 	}
 
 	serverAddr := args[1]
-	KVStore = make(map[string]string)
 	ConnectServer(serverAddr)
 
 }
