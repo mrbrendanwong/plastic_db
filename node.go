@@ -390,18 +390,22 @@ func RemoveNode(node net.Addr){
 	defer allNodes.RUnlock()
 
 	// send broadcast to all network nodes declaring node failure
+	var reply int
+	args:= &NodeInfo{
+		Address: node,
+	}
 	for _, n := range allNodes.nodes {
-		var reply int
-		args:= &NodeInfo{
-			Address: node,
-		}
 		err := n.NodeConn.Call("KVNode.NodeFailureAlert", &args, &reply)
 		if err != nil {
 			outLog.Println("Failure broadcast failed to ", n.Address)
 		}
 	}
 
-	//TODO: send failure acknowledgement to server
+	// send failure acknowledgement to server
+	err := Server.Call("KVServer.NodeFailureAlert", &args, &reply)
+	if err != nil {
+		outLog.Println("Failure alert to server failed")
+	}
 }
 
 

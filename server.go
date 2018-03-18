@@ -162,14 +162,18 @@ func SendToCoordinator() {
 	return
 }
 
-//// Report Failure
-//func (s KVServer) ReportNodeFailure(info *FailureInfo, _unused *int) error {
-//	failedNode := info.Failed
-//	reporterNode := info.Reporter
-//	outLog.Println("Reported failure of ", failedNode, " received by ", reporterNode)
-//
-//	return nil
-//}
+// Report failed network node
+func (s KVServer) NodeFailureAlert(info *NodeInfo, _unused *int) error {
+	failedNode := info.Address
+
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	delete(allNodes.nodes, failedNode.String())
+	outLog.Println("Node removed from system: ", failedNode.String())
+
+	return nil
+}
 
 
 func (s KVServer) ReportCoordinatorFailure(node *FailureInfo, _unused *int) error {
