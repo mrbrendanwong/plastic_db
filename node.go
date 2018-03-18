@@ -94,6 +94,13 @@ type NodeInfo struct {
 	Address net.Addr
 }
 
+// What type of values are we storing?
+// Do we need a time stamp?
+type KVStore struct {
+	sync.RWMutex
+	kvstore map[string]string
+}
+
 // For RPC Calls
 type KVNode int
 
