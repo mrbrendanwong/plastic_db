@@ -11,19 +11,25 @@ $ go run server.go
 package main
 
 import (
-	"os"
+	"encoding/gob"
+	"encoding/json"
 	"flag"
 	"io/ioutil"
-	"math/rand"
 	"log"
+	"math/rand"
 	"net"
 	"net/rpc"
+	"os"
+	"strconv"
 	"sync"
 	"time"
+<<<<<<< HEAD
 	"encoding/json"
 	"encoding/gob"
 	"strconv"
 	"fmt"
+=======
+>>>>>>> dev
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,44 +57,45 @@ func(e RegistrationError) Error() string {
 ////////////////////////////////////////////////////////////////////////////////
 
 // Variables related to general server function
-var  (
-	config 		Config
-	errLog		*log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog		*log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+var (
+	config Config
+	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
 )
 
 // Variables related to nodes
 var (
-	allNodes 			AllNodes = AllNodes{nodes: make(map[string]*Node)}
-	currentCoordinator 	Node
-	nextID 				int = 0
+	allNodes           AllNodes = AllNodes{nodes: make(map[string]*Node)}
+	currentCoordinator Node
+	nextID             int = 0
 )
+
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
 // Configuration
 type Config struct {
-	ServerAddress	string 			`json:"server-ip-port"`
-	NodeSettings 	NodeSettings 	`json:"node-settings"`
+	ServerAddress string       `json:"server-ip-port"`
+	NodeSettings  NodeSettings `json:"node-settings"`
 }
 
 type RegistrationPackage struct {
-	Settings 		NodeSettings
-	ID 				string
-	IsCoordinator 	bool
+	Settings      NodeSettings
+	ID            string
+	IsCoordinator bool
 }
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat 			uint32 `json:"heartbeat"`
-	MajorityThreshold 	float32 `json:"majority-threshold"`
+	HeartBeat         uint32  `json:"heartbeat"`
+	MajorityThreshold float32 `json:"majority-threshold"`
 }
 
 // Node - a node of the network
 type Node struct {
-	ID 				string
-	IsCoordinator 	bool
-	Address			net.Addr
+	ID            string
+	IsCoordinator bool
+	Address       net.Addr
 }
 
 // All Nodes - a map containing all nodes, including the coordinator
@@ -98,7 +105,7 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
-	Address				net.Addr
+	Address net.Addr
 }
 
 // For RPC calls
@@ -124,25 +131,24 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 		return IDAlreadyRegisteredError(id);
 	}
 
-	// Check if this is the first node; if so set coordinator
-	isCoordinator := false
-	if len(allNodes.nodes) == 0 {
-		isCoordinator = true
-	}
-
 	// Set node information and add to map
 	allNodes.nodes[id] = &Node{
-		IsCoordinator: 	isCoordinator,
-		Address: 		nodeInfo.Address}
-
-	// Set current coordinator
-	currentCoordinator = *allNodes.nodes[id]
+		IsCoordinator: false,
+		Address:       nodeInfo.Address,
+	}
+	// Check if this is the first node; if so set iscoordinator
+	// and set current coordinator
+	if len(allNodes.nodes) == 1 {
+		allNodes.nodes[id].IsCoordinator = true
+		// Set current coordinator
+		currentCoordinator = *allNodes.nodes[id]
+	}
 
 	// Reply
 	*settings = RegistrationPackage{Settings: config.NodeSettings,
-									ID: id,
-									IsCoordinator: isCoordinator}
-	
+		ID:            id,
+		IsCoordinator: allNodes.nodes[id].IsCoordinator}
+
 	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
 
 	return nil
@@ -153,11 +159,14 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 //	return nil
 //}
 
-// Get all nodes currently in the network
-// *Useful if a heartbeat connection between miner dies, but the network is still online
-//func (s *KVServer) GetAllNodes() error {
-//	return nil
-//}
+// GetAllNodes currently in the network
+// *Useful if a heartbeat connection between nodes dies, but the network is still online
+func (s *KVServer) GetAllNodes(msg int, response *map[string]*Node) error {
+	allNodes.RLock()
+	*response = allNodes.nodes
+	allNodes.RUnlock()
+	return nil
+}
 
 // Set coordinator - set the first node of the network as a coordinator
 func SetCoordinator() {
@@ -167,6 +176,16 @@ func SetCoordinator() {
 // Send a Node to the coordinator to be set into the network
 func SendToCoordinator() {
 	return
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// SERVER <-> CLIENT FUNCTIONS
+////////////////////////////////////////////////////////////////////////////////
+
+// GetCoordinatorAddress sends coord address
+func (s *KVServer) GetCoordinatorAddress(msg int, response *net.Addr) error {
+	*response = currentCoordinator.Address
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -186,7 +205,7 @@ func readConfigOrDie(path string) {
 
 func main() {
 	gob.Register(&net.TCPAddr{})
-	
+
 	path := flag.String("c", "", "Path to the JSON config")
 	flag.Parse()
 
