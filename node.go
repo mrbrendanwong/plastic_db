@@ -24,12 +24,11 @@ import (
 // ERRORS
 ////////////////////////////////////////////////////////////////////////////////
 
-<<<<<<< HEAD
 // Contains key
 type InvalidKeyError string
 
 func (e InvalidKeyError) Error() string {
-	return fmt.Sprintf("Node: Invalid Key [%s]", string(e))
+	return fmt.Sprintf("Node: Invalid key [%s]", string(e))
 }
 
 // Contains serverAddr
@@ -38,8 +37,7 @@ type DisconnectedServerError string
 func (e DisconnectedServerError) Error() string {
 	return fmt.Sprintf("Node: Cannot connect to server [%s]", string(e));
 }
-=======
->>>>>>> dev
+
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ////////////////////////////////////////////////////////////////////////////////

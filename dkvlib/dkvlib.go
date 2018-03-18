@@ -3,6 +3,53 @@ package dkvapi
 ///////////////////////////////////////////////////////////////////////////
 // ERROR DEFINITIONS
 ///////////////////////////////////////////////////////////////////////////
+type InvalidKeyCharError string
+
+func (e InvalidKeyCharError) Error() string {
+	return fmt.Sprintf("DKV: Invalid character in key [%s]", string(e))
+}
+
+type InvalidValueCharError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: Invalid character in value [%s]", string(e))
+}
+
+type KeyTooLongError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: Key is above character limit [%s]", string(e))
+}
+
+type ValueTooLongError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: Value is above character limit [%s]", string(e))
+}
+
+type CoordinatorWriteError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: Could not write to the coordinator node. Write failed [%s]", string(e))
+}
+
+type MajorityWriteError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: Could not write to a majority of network nodes. Write failed [%s]", string(e))
+}
+
+type NonexistentKeyError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: The desired key does not exist [%s]", string(e))
+}
+
+type DisconnectedError string
+
+func (e ) Error() string {
+	return fmt.Sprintf("DKV: Cannot connect to [%s]", string(e))
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
