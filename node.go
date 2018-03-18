@@ -48,7 +48,8 @@ var (
 
 // For coordinator
 var (
-	allFailures  AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
+	allFailures  	AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
+	voteTimeout		int64 = int64(time.Millisecond * 20000)
 
 )
 
@@ -92,6 +93,7 @@ type FailedNode struct {
 	timestamp	int64
 	address 	net.Addr
 	votes		int
+	//isFailure	chan bool
 }
 
 type NodeInfo struct {
@@ -236,28 +238,46 @@ func ConnectToCoordinator() {
 
 // Check for heartbeat timeouts from other nodes
 func MonitorHeartBeats(addr string){
-	for{
-		time.Sleep(time.Duration(Settings.HeartBeat + 1000) * time.Millisecond)
-		allNodes.RLock()
-		if time.Now().UnixNano() - allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat) * int64(time.Millisecond){
-			if(isCoordinator){
-				outLog.Println("Connection with ", addr, " timed out.")
-				//TODO: report coordinator - node failure
-				//ReportNodeFailure(allNodes.nodes[addr])
-			} else if(allNodes.nodes[addr].IsCoordinator){
-				outLog.Println("Connection with coordinator timed out.")
-				//TODO: handle coordinator failure
-				ReportCoordinatorFailure(allNodes.nodes[addr])
-			} else{
-				outLog.Println("Connection with ", addr, " timed out.")
-				//TODO: handle node - node failure
-				ReportNodeFailure(allNodes.nodes[addr])
+	for {
+		time.Sleep(time.Duration(Settings.HeartBeat+1000) * time.Millisecond)
+		if _, ok := allNodes.nodes[addr]; ok{
+			if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
+				allNodes.RLock()
+				if (isCoordinator) {
+					outLog.Println("Connection with ", addr, " timed out.")
+					//TODO: report coordinator - node failure
+					//ReportNodeFailure(allNodes.nodes[addr])
+				} else if (allNodes.nodes[addr].IsCoordinator) {
+					outLog.Println("Connection with coordinator timed out.")
+					//TODO: handle coordinator failure
+					ReportCoordinatorFailure(allNodes.nodes[addr])
+				} else {
+					outLog.Println("Connection with ", addr, " timed out.")
+					//TODO: handle node - node failure
+					ReportNodeFailure(allNodes.nodes[addr])
+				}
+				allNodes.RUnlock()
 			}
+		} else {
+			outLog.Println("Node not found.", addr)
+			return
 		}
-		allNodes.RUnlock()
+
 	}
 }
 
+// Broadcast of node failure from coordinator
+func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
+	outLog.Println(" Node failure alert received from coordinator:  ", node.Address)
+
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// remove node from list of nodes
+	delete(allNodes.nodes, node.Address.String())
+	outLog.Println(" Node successfully removed: ", node.Address)
+	return nil
+}
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
@@ -270,7 +290,7 @@ func CreatePrimaryBackup() {
 	return
 }
 
-
+// Node failure report from network node
 func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 	failure := info.Failed
 	reporter := info.Reporter
@@ -278,7 +298,7 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 	outLog.Println("Failed node ", failure, " detected by ", reporter)
 
 	allFailures.Lock()
-	if node, ok := allFailures.nodes[failure.String()]; ok {
+	if node, ok := allFailures.nodes[failure.String()]; ok {				// TODO: do not increment vote if report from reporter node has already been received
 		node.votes++
 		outLog.Println(node.votes, "votes received for ", failure)
 		allFailures.Unlock()
@@ -290,28 +310,66 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 			address: failure,
 			votes: 1,
 		}
-		go DetectFailure(failure, allFailures.nodes[failure.String()].timestamp)
 		allFailures.Unlock()
 
+		go DetectFailure(failure, allFailures.nodes[failure.String()].timestamp)
 	}
-
 
 	return nil
 }
 
-
+// Begin listening for failure reports for given node
 func DetectFailure(failureAddr net.Addr, timestamp int64) {
-	for time.Now().UnixNano() < timestamp + int64(time.Millisecond*20000) {
+	quorum := getQuorumNum()
+	// if time window has passed, and quorum not reached, failure is considered invalid
+	for time.Now().UnixNano() < timestamp + voteTimeout {		//TODO: put timeout in config file
 		allFailures.RLock()
-		if (allFailures.nodes[failureAddr.String()].votes > 2) { // TODO: change to quorum
+		if allFailures.nodes[failureAddr.String()].votes > quorum { 
 			outLog.Println("Quorum votes on failure reached for ", failureAddr.String())
 			allFailures.RUnlock()
+			RemoveNode(failureAddr)
 			return
 		}
 		allFailures.RUnlock()
 		time.Sleep(time.Millisecond)
 	}
+
+	// TODO: TELL NODES TO RECONNECT?
 	outLog.Println("Timeout reached.  Failure invalid for ", failureAddr.String())
+}
+
+// Remove node from network
+func RemoveNode(node net.Addr){
+	outLog.Println("Removing ", node)
+	allNodes.Lock()
+	delete(allNodes.nodes, node.String())
+	allNodes.Unlock()
+
+	allNodes.RLock()
+	defer allNodes.RUnlock()
+
+	// send broadcast to all network nodes declaring node failure
+	for _, n := range allNodes.nodes {
+		var reply int
+		args:= &NodeInfo{
+			Address: node,
+		}
+		err := n.NodeConn.Call("KVNode.NodeFailureAlert", &args, &reply)
+		if err != nil {
+			outLog.Println("Failure broadcast failed to ", n.Address)
+		}
+	}
+}
+
+
+// Returns quorum: num nodes / 2 + 1
+func getQuorumNum() int {
+	if !isCoordinator {
+		handleErrorFatal("Not a network node function.", nil)
+	}
+	allNodes.RLock()
+	defer allNodes.RUnlock()
+	return len(allNodes.nodes)
 }
 ////////////////////////////////////////////////////////////////////////////////
 // NODE <-> NODE FUNCTION
@@ -326,6 +384,8 @@ func ConnectNode(node *Node) error {
 		outLog.Println("Could not reach node ", nodeAddr.String())
 		return err
 	}
+
+	node.NodeConn = nodeConn
 
 	// Save coordinator
 	if(node.IsCoordinator){
@@ -343,15 +403,15 @@ func ConnectNode(node *Node) error {
 
 	// Add this new node to node map
 	allNodes.Lock()
-	defer allNodes.Unlock()
 	allNodes.nodes[nodeAddr.String()] = node
+	allNodes.Unlock()
 
 	outLog.Println("Successfully connected to ", nodeAddr.String())
 
 	// send heartbeats
-	go sendHeartBeats(nodeConn)
+	go sendHeartBeats(nodeAddr.String())
 
-	//TODO: check for timeouts
+	// check for timeouts
 	go MonitorHeartBeats(nodeAddr.String())
 	return nil
 }
@@ -371,7 +431,6 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 
 	// Add node to node map
 	allNodes.Lock()
-	defer allNodes.Unlock()
 
 	allNodes.nodes[addr.String()] = &Node{
 		      id,
@@ -380,10 +439,10 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 		      time.Now().UnixNano(),
 		      conn,
 	}
-
+	allNodes.Unlock()
 	outLog.Println("Return connection with node succeeded: ", addr.String())
 
-	go sendHeartBeats(conn)
+	go sendHeartBeats(addr.String())
 
 	go MonitorHeartBeats(addr.String())
 
@@ -391,14 +450,18 @@ func (n KVNode)RegisterNode(args *NodeInfo, _unused *int) error {
 }
 
 // send heartbeats to passed node
-func sendHeartBeats(conn *rpc.Client) error {
+func sendHeartBeats(addr string) error {
 	args := &NodeInfo{Address: LocalAddr}
 	var reply int
 	for{
-		err := conn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
+		if _,ok := allNodes.nodes[addr]; !ok {
+			outLog.Println("Connection invalid.")
+			return nil
+		}
+		err := allNodes.nodes[addr].NodeConn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
 		if err != nil {
-			//outLog.Println("Error sending heartbeats")
-			//return err
+			outLog.Println("Error sending heartbeats")
+
 		}
 		time.Sleep(time.Duration(Settings.HeartBeat)* time.Millisecond)
 	}
