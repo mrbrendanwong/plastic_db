@@ -2,7 +2,6 @@ package dkvlib
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/rpc"
 	"os"
@@ -39,7 +38,7 @@ func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error
 	// Connect to coordinatorNode
 	coordinator, err := rpc.Dial("tcp", coordinatorAddr)
 	if err != nil {
-		fmt.Println("Could not connect to coordinator.", errors.New("Coordinator Disconnected"))
+		outLog.Println("Could not connect to coordinator.", errors.New("Coordinator Disconnected"))
 		return nil, errors.New("Coordinator Disconnected")
 	}
 
@@ -61,8 +60,7 @@ func (c CNode) Read(key string) (string, error) {
 
 // Write value to key
 func (c CNode) Write(key, value string) error {
-	fmt.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
-	//TODO
+	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 	args := struct {
 		Key   string
 		Value string
