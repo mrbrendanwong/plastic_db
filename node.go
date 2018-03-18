@@ -92,7 +92,8 @@ type AllFailures struct {
 type FailedNode struct {
 	timestamp	int64
 	address 	net.Addr
-	votes		int
+	//votes		int
+	reporters	map[string]bool
 	//isFailure	chan bool
 }
 
@@ -247,6 +248,7 @@ func MonitorHeartBeats(addr string){
 					outLog.Println("Connection with ", addr, " timed out.")
 					//TODO: report coordinator - node failure
 					//ReportNodeFailure(allNodes.nodes[addr])
+					SaveNodeFailure(allNodes.nodes[addr])
 				} else if (allNodes.nodes[addr].IsCoordinator) {
 					outLog.Println("Connection with coordinator timed out.")
 					//TODO: handle coordinator failure
@@ -290,6 +292,31 @@ func CreatePrimaryBackup() {
 	return
 }
 
+// Coordinator has observed failure of a node
+func SaveNodeFailure(node *Node){
+	addr := node.Address
+
+	if !isCoordinator {
+		handleErrorFatal("Network node attempting to run coordinator node function.", nil)
+	}
+	allFailures.Lock()
+	if node, ok := allFailures.nodes[addr.String()]; ok{
+		node.reporters[LocalAddr.String()] = true
+		allFailures.Unlock()
+	} else {
+		reporters := make(map[string]bool)
+		allFailures.nodes[addr.String()] = &FailedNode{
+			timestamp: time.Now().UnixNano(),
+			address: addr,
+			reporters: reporters,
+		}
+		allFailures.Unlock()
+		go DetectFailure(addr, allFailures.nodes[addr.String()].timestamp)
+	}
+
+}
+
+
 // Node failure report from network node
 func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 	failure := info.Failed
@@ -299,16 +326,20 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 
 	allFailures.Lock()
 	if node, ok := allFailures.nodes[failure.String()]; ok {				// TODO: do not increment vote if report from reporter node has already been received
-		node.votes++
-		outLog.Println(node.votes, "votes received for ", failure)
+		if _, ok := node.reporters[reporter.String()]; !ok{
+			node.reporters[reporter.String()] = true
+		}
+		outLog.Println(len(node.reporters), "votes received for ", failure)
 		allFailures.Unlock()
 	} else {
 		// first detection of failure
+		reporters := make(map[string]bool)
+		reporters[reporter.String()] = true
 		outLog.Println("First failure of ", failure)
 		allFailures.nodes[failure.String()] = &FailedNode{
 			timestamp: time.Now().UnixNano(),
 			address: failure,
-			votes: 1,
+			reporters: reporters,
 		}
 		allFailures.Unlock()
 
@@ -321,19 +352,25 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 // Begin listening for failure reports for given node
 func DetectFailure(failureAddr net.Addr, timestamp int64) {
 	quorum := getQuorumNum()
+
 	// if time window has passed, and quorum not reached, failure is considered invalid
 	for time.Now().UnixNano() < timestamp + voteTimeout {		//TODO: put timeout in config file
 		allFailures.RLock()
-		if allFailures.nodes[failureAddr.String()].votes > quorum { 
+		if len(allFailures.nodes[failureAddr.String()].reporters) >= quorum {
 			outLog.Println("Quorum votes on failure reached for ", failureAddr.String())
 			allFailures.RUnlock()
+			allFailures.Lock()
+			delete(allFailures.nodes, failureAddr.String())
+			allFailures.Unlock()
 			RemoveNode(failureAddr)
 			return
 		}
 		allFailures.RUnlock()
 		time.Sleep(time.Millisecond)
 	}
-
+	allFailures.Lock()
+	delete(allFailures.nodes, failureAddr.String())
+	allFailures.Unlock()
 	// TODO: TELL NODES TO RECONNECT?
 	outLog.Println("Timeout reached.  Failure invalid for ", failureAddr.String())
 }
