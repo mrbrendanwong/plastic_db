@@ -242,20 +242,17 @@ func MonitorHeartBeats(addr string){
 	for {
 		time.Sleep(time.Duration(Settings.HeartBeat+1000) * time.Millisecond)
 		if _, ok := allNodes.nodes[addr]; ok{
+
 			if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
 				allNodes.RLock()
 				if (isCoordinator) {
 					outLog.Println("Connection with ", addr, " timed out.")
-					//TODO: report coordinator - node failure
-					//ReportNodeFailure(allNodes.nodes[addr])
 					SaveNodeFailure(allNodes.nodes[addr])
 				} else if (allNodes.nodes[addr].IsCoordinator) {
 					outLog.Println("Connection with coordinator timed out.")
-					//TODO: handle coordinator failure
 					ReportCoordinatorFailure(allNodes.nodes[addr])
 				} else {
 					outLog.Println("Connection with ", addr, " timed out.")
-					//TODO: handle node - node failure
 					ReportNodeFailure(allNodes.nodes[addr])
 				}
 				allNodes.RUnlock()
@@ -336,11 +333,13 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 		reporters := make(map[string]bool)
 		reporters[reporter.String()] = true
 		outLog.Println("First failure of ", failure)
+
 		allFailures.nodes[failure.String()] = &FailedNode{
 			timestamp: time.Now().UnixNano(),
 			address: failure,
 			reporters: reporters,
 		}
+
 		allFailures.Unlock()
 
 		go DetectFailure(failure, allFailures.nodes[failure.String()].timestamp)
@@ -359,15 +358,20 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 		if len(allFailures.nodes[failureAddr.String()].reporters) >= quorum {
 			outLog.Println("Quorum votes on failure reached for ", failureAddr.String())
 			allFailures.RUnlock()
+
+			// Remove from pending failures
 			allFailures.Lock()
 			delete(allFailures.nodes, failureAddr.String())
 			allFailures.Unlock()
+
 			RemoveNode(failureAddr)
 			return
 		}
 		allFailures.RUnlock()
 		time.Sleep(time.Millisecond)
 	}
+
+	// Remove from pending failures
 	allFailures.Lock()
 	delete(allFailures.nodes, failureAddr.String())
 	allFailures.Unlock()
@@ -396,6 +400,8 @@ func RemoveNode(node net.Addr){
 			outLog.Println("Failure broadcast failed to ", n.Address)
 		}
 	}
+
+	//TODO: send failure acknowledgement to server
 }
 
 
@@ -406,7 +412,7 @@ func getQuorumNum() int {
 	}
 	allNodes.RLock()
 	defer allNodes.RUnlock()
-	return len(allNodes.nodes)
+	return len(allNodes.nodes) / 2 + 1
 }
 ////////////////////////////////////////////////////////////////////////////////
 // NODE <-> NODE FUNCTION
@@ -425,7 +431,7 @@ func ConnectNode(node *Node) error {
 	node.NodeConn = nodeConn
 
 	// Save coordinator
-	if(node.IsCoordinator){
+	if node.IsCoordinator {
 		Coordinator = nodeConn
 	}
 
