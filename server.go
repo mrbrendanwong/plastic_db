@@ -162,14 +162,14 @@ func SendToCoordinator() {
 	return
 }
 
-// Report Failure
-func (s KVServer) ReportNodeFailure(info *FailureInfo, _unused *int) error {
-	failedNode := info.Failed
-	reporterNode := info.Reporter
-	outLog.Println("Reported failure of ", failedNode, " received by ", reporterNode)
-
-	return nil
-}
+//// Report Failure
+//func (s KVServer) ReportNodeFailure(info *FailureInfo, _unused *int) error {
+//	failedNode := info.Failed
+//	reporterNode := info.Reporter
+//	outLog.Println("Reported failure of ", failedNode, " received by ", reporterNode)
+//
+//	return nil
+//}
 
 
 func (s KVServer) ReportCoordinatorFailure(node *FailureInfo, _unused *int) error {

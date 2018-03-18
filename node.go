@@ -38,10 +38,18 @@ var (
 var (
 	LocalAddr     net.Addr
 	Server        *rpc.Client
+	Coordinator	  *rpc.Client
 	allNodes      AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	isCoordinator bool
 	Settings      NodeSettings
 	ID            string
+)
+
+
+// For coordinator
+var (
+	allFailures  AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
+
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -73,6 +81,17 @@ type Node struct {
 type AllNodes struct {
 	sync.RWMutex
 	nodes map[string]*Node
+}
+
+type AllFailures struct {
+	sync.RWMutex
+	nodes map[string]*FailedNode
+}
+
+type FailedNode struct {
+	timestamp	int64
+	address 	net.Addr
+	votes		int
 }
 
 type NodeInfo struct {
@@ -180,14 +199,12 @@ func GetNodes() (err error){
 }
 
 func ReportNodeFailure(node *Node){
-	// If connection with server has failed, reconnect
-
 	info := &FailureInfo{
 		Failed: node.Address,
 		Reporter: LocalAddr,
 	}
 	var reply int
-	err := Server.Call("KVServer.ReportNodeFailure", &info, &reply)
+	err := Coordinator.Call("KVNode.ReportNodeFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of node ", node.Address)
 	}
@@ -226,7 +243,7 @@ func MonitorHeartBeats(addr string){
 			if(isCoordinator){
 				outLog.Println("Connection with ", addr, " timed out.")
 				//TODO: report coordinator - node failure
-				ReportNodeFailure(allNodes.nodes[addr])
+				//ReportNodeFailure(allNodes.nodes[addr])
 			} else if(allNodes.nodes[addr].IsCoordinator){
 				outLog.Println("Connection with coordinator timed out.")
 				//TODO: handle coordinator failure
@@ -253,6 +270,49 @@ func CreatePrimaryBackup() {
 	return
 }
 
+
+func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
+	failure := info.Failed
+	reporter := info.Reporter
+
+	outLog.Println("Failed node ", failure, " detected by ", reporter)
+
+	allFailures.Lock()
+	if node, ok := allFailures.nodes[failure.String()]; ok {
+		node.votes++
+		outLog.Println(node.votes, "votes received for ", failure)
+		allFailures.Unlock()
+	} else {
+		// first detection of failure
+		outLog.Println("First failure of ", failure)
+		allFailures.nodes[failure.String()] = &FailedNode{
+			timestamp: time.Now().UnixNano(),
+			address: failure,
+			votes: 1,
+		}
+		go DetectFailure(failure, allFailures.nodes[failure.String()].timestamp)
+		allFailures.Unlock()
+
+	}
+
+
+	return nil
+}
+
+
+func DetectFailure(failureAddr net.Addr, timestamp int64) {
+	for time.Now().UnixNano() < timestamp + int64(time.Millisecond*20000) {
+		allFailures.RLock()
+		if (allFailures.nodes[failureAddr.String()].votes > 2) { // TODO: change to quorum
+			outLog.Println("Quorum votes on failure reached for ", failureAddr.String())
+			allFailures.RUnlock()
+			return
+		}
+		allFailures.RUnlock()
+		time.Sleep(time.Millisecond)
+	}
+	outLog.Println("Timeout reached.  Failure invalid for ", failureAddr.String())
+}
 ////////////////////////////////////////////////////////////////////////////////
 // NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
@@ -260,10 +320,16 @@ func CreatePrimaryBackup() {
 func ConnectNode(node *Node) error {
 	outLog.Println("Attempting to connected to node...", node.Address.String())
 	nodeAddr := node.Address
+
 	nodeConn, err := rpc.Dial("tcp", nodeAddr.String())
 	if err != nil {
 		outLog.Println("Could not reach node ", nodeAddr.String())
 		return err
+	}
+
+	// Save coordinator
+	if(node.IsCoordinator){
+		Coordinator = nodeConn
 	}
 
 	// Set up reverse connection
