@@ -23,11 +23,35 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"fmt"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // ERRORS
 ////////////////////////////////////////////////////////////////////////////////
+
+// ID has already been assigned in the server
+type IDAlreadyRegisteredError string
+
+func (e IDAlreadyRegisteredError) Error() string {
+	return fmt.Sprintf("Server: ID already registered [%s]", string(e))
+}
+
+// Address already registered in the server
+type AddressAlreadyRegisteredError string 
+
+func (e AddressAlreadyRegisteredError) Error() string {
+	return fmt.Sprintf("Server: Address already registered [%s]", string(e))
+}
+
+
+// Misc. registration error
+type RegistrationError string
+
+func (e RegistrationError) Error() string {
+	return fmt.Sprintf("Server: Failure to register node [%s]", string(e))
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
@@ -64,8 +88,11 @@ type RegistrationPackage struct {
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat         uint32  `json:"heartbeat"`
-	MajorityThreshold float32 `json:"majority-threshold"`
+	HeartBeat         		uint32  `json:"heartbeat"`
+	VotingWait 				uint32 	`json:"voting-wait"`
+	ElectionWait 			uint32 	`json:"election-wait"`
+	ServerUpdateInterval 	uint32 	`json:"server-update-interval"`
+	MajorityThreshold 		float32 `json:"majority-threshold"`
 }
 
 // Node - a node of the network
@@ -105,8 +132,7 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 
 	// Define errors
 	if _, exists := allNodes.nodes[id]; exists {
-		outLog.Println("Node with ID already exists")
-		return nil
+		return IDAlreadyRegisteredError(id);
 	}
 
 	// Set node information and add to map
@@ -128,6 +154,7 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 		IsCoordinator: allNodes.nodes[id].IsCoordinator}
 
 	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
+	outLog.Printf("Gave node ID %s\n", id)
 
 	return nil
 }
