@@ -313,6 +313,7 @@ func SaveNodeFailure(node *Node){
 		allFailures.Unlock()
 	} else {
 		reporters := make(map[string]bool)
+		reporters[LocalAddr.String()] = true;
 		allFailures.nodes[addr.String()] = &FailedNode{
 			timestamp: time.Now().UnixNano(),
 			address: addr,
