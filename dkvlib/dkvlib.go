@@ -108,7 +108,7 @@ func (c CNode) Read(key string) (string, error) {
 	outLog.Printf("Sending read to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorRead", &key, &reply)
 	if err != nil {
-		outLog.Println("Could not connect to coordinator: ", err)
+		outLog.Println("Could not complete read: ", err)
 		return "", err
 	}
 	outLog.Printf("Successfully completed read")
@@ -128,7 +128,7 @@ func (c CNode) Write(key, value string) error {
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", &args, &reply)
 	if err != nil {
-		outLog.Println("Could not connect to coordinator: ", err)
+		outLog.Println("Could not complete write: ", err)
 		return err
 	}
 	outLog.Printf("Successfully completed write")
@@ -148,7 +148,7 @@ func (c CNode) Delete(key string) error {
 	outLog.Printf("Sending delete to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorDelete", &key, &reply)
 	if err != nil {
-		outLog.Println("Could not connect to coordinator: ", err)
+		outLog.Println("Could not complete delete: ", err)
 		return err
 	}
 	outLog.Printf("Successfully completed delete")
