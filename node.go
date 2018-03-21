@@ -126,6 +126,10 @@ func ConnectServer(serverAddr string) {
 	}
 	localAddr = fmt.Sprintf("%s%s", localAddr, ":0")
 	ln, err := net.Listen("tcp", localAddr)
+	if err != nil {
+		outLog.Printf("Failed to get a local addr:%s\n", err)
+		return
+	}
 	LocalAddr = ln.Addr()
 
 	// Connect to server
@@ -240,6 +244,12 @@ func AddNodeToNetwork() {
 
 func CreatePrimaryBackup() {
 	return
+}
+
+func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
+	outLog.Println("Heartbeat request received from client.")
+	*reply = time.Now().UnixNano()
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -73,6 +73,7 @@ type CNodeConn interface {
 	Write(key, value string) error
 	Update(key, value string) error
 	Delete(key string) error
+	SendHeartbeat() (int64, error)
 }
 
 type CNode struct {
@@ -136,4 +137,12 @@ func (c CNode) Update(key, value string) error {
 func (c CNode) Delete(key string) error {
 	//TODO
 	return nil
+}
+
+// Check that RPC connection is still alive.
+func (c CNode) SendHeartbeat() (int64, error) {
+	var args int
+	var reply int64
+	err := c.Coordinator.Call("KVNode.SendHeartbeat", &args, &reply)
+	return reply, err
 }
