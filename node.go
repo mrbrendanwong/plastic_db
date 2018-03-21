@@ -24,6 +24,20 @@ import (
 // ERRORS
 ////////////////////////////////////////////////////////////////////////////////
 
+// Contains key
+type InvalidKeyError string
+
+func (e InvalidKeyError) Error() string {
+	return fmt.Sprintf("Node: Invalid key [%s]", string(e))
+}
+
+// Contains serverAddr
+type DisconnectedServerError string
+
+func (e DisconnectedServerError) Error() string {
+	return fmt.Sprintf("Node: Cannot connect to server [%s]", string(e))
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ////////////////////////////////////////////////////////////////////////////////
@@ -76,8 +90,11 @@ type WriteRequest struct {
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat         uint32  `json:"heartbeat"`
-	MajorityThreshold float32 `json:"majority-threshold"`
+	HeartBeat         		uint32  `json:"heartbeat"`
+	VotingWait 				uint32 	`json:"voting-wait"`
+	ElectionWait 			uint32 	`json:"election-wait"`
+	ServerUpdateInterval 	uint32 	`json:"server-update-interval"`
+	MajorityThreshold 		float32 `json:"majority-threshold"`
 }
 
 // Node Settings
@@ -136,6 +153,10 @@ func ConnectServer(serverAddr string) {
 	}
 	localAddr = fmt.Sprintf("%s%s", localAddr, ":0")
 	ln, err := net.Listen("tcp", localAddr)
+	if err != nil {
+		outLog.Printf("Failed to get a local addr:%s\n", err)
+		return
+	}
 	LocalAddr = ln.Addr()
 
 	// Connect to server
@@ -429,6 +450,12 @@ func getQuorumNum() int {
 	allNodes.RLock()
 	defer allNodes.RUnlock()
 	return len(allNodes.nodes) / 2 + 1
+}
+
+func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
+	outLog.Println("Heartbeat request received from client.")
+	*reply = time.Now().UnixNano()
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/rpc"
 	"os"
+	"time"
 
 	"./dkvlib"
 )
@@ -31,6 +32,7 @@ var (
 	localAddr           net.Addr
 	coordinatorNodeAddr net.Addr
 	nodesAddrs          []net.Addr
+	connected           bool
 )
 
 // Node - a node of the network
@@ -65,6 +67,27 @@ func ConnectServer(serverAddr string) {
 	outLog.Printf("Successfully connected to server at %s!", serverAddr)
 }
 
+// Probe coordinator for liveliness
+// Returns error if last heartbeat was more than hearbeatInterval
+func getHeartbeat(coordinator dkvlib.CNodeConn, heartbeatInterval time.Duration) {
+	lastHeartbeat := time.Now().UnixNano()
+	for {
+		heartbeat, err := coordinator.SendHeartbeat()
+		if err != nil {
+			if time.Now().UnixNano()-lastHeartbeat > int64(heartbeatInterval) {
+				connected = false
+				outLog.Println("Client disconnected from Coordinator. Please query Server for new coordinator.")
+				return
+			}
+		} else {
+			lastHeartbeat = heartbeat
+		}
+
+		// Query every tenth of a second
+		time.Sleep(time.Millisecond * 100)
+	}
+}
+
 func main() {
 	gob.Register(&net.TCPAddr{})
 
@@ -88,12 +111,21 @@ func main() {
 	outLog.Printf("Coordinator address received: %v\n", coordinatorNodeAddr)
 
 	// Connect to coordinator API
-
 	coordinator, error := dkvlib.OpenCoordinatorConn(coordinatorNodeAddr.String())
 	if error != nil {
 		outLog.Println("Couldn't connect to dkvlib:", error)
+		return
 	}
+	connected = true
+
+	// Call heartbeat probe function on API
+	go getHeartbeat(coordinator, 2*time.Second)
+
 	// Call functions on API
 	coordinator.Write("a", "5")
+
+	// For testing
+	for {
+	}
 
 }

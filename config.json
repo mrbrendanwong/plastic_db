@@ -2,6 +2,9 @@
 	"server-ip-port": "127.0.0.1:12345",
 	"node-settings": {
 		"heartbeat": 5000,
+		"voting-wait": 5000,
+		"election-wait": 5000,
+		"server-update-interval": 5000,
 		"majority-threshold": 0.50
 	}
 }
