@@ -94,6 +94,23 @@ func main() {
 		outLog.Println("Couldn't connect to dkvlib:", error)
 	}
 	// Call functions on API
-	coordinator.Write("a", "5")
+	err = coordinator.Write("a", "5")
+	if err != nil {
+		outLog.Println("Write failed")
+	} else {
+		outLog.Printf("Write success")
+	}
+	val, error := coordinator.Read("a")
+	if error != nil {
+		outLog.Println("Read failed")
+	} else {
+		outLog.Printf("Read success, Value returned: %s", val)
+	}
+	err = coordinator.Delete("a")
+	if err != nil {
+		outLog.Println("Delete failed")
+	} else {
+		outLog.Printf("Delete success")
+	}
 
 }

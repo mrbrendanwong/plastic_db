@@ -2,6 +2,7 @@ package dkvlib
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/rpc"
 	"os"
@@ -101,13 +102,21 @@ func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error
 
 // Get value of key
 func (c CNode) Read(key string) (string, error) {
-	// TODO
-	return "", nil
+
+	var reply string
+
+	outLog.Printf("Sending read to coordinator")
+	err := c.Coordinator.Call("KVNode.CoordinatorRead", &key, &reply)
+	if err != nil {
+		outLog.Println("Could not connect to coordinator: ", err)
+		return "", err
+	}
+	outLog.Printf("Successfully completed read")
+	return reply, nil
 }
 
 // Write value to key
 func (c CNode) Write(key, value string) error {
-	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 	args := struct {
 		Key   string
 		Value string
@@ -117,12 +126,12 @@ func (c CNode) Write(key, value string) error {
 	}
 	var reply int
 	outLog.Printf("Sending write to coordinator")
-	err := c.Coordinator.Call("KVNode.Write", &args, &reply)
+	err := c.Coordinator.Call("KVNode.CoordinatorWrite", &args, &reply)
 	if err != nil {
 		outLog.Println("Could not connect to coordinator: ", err)
 		return err
 	}
-	outLog.Printf("Successfully completed write to coordinator")
+	outLog.Printf("Successfully completed write")
 	return nil
 }
 
@@ -134,6 +143,14 @@ func (c CNode) Update(key, value string) error {
 
 // Delete key-value pair
 func (c CNode) Delete(key string) error {
-	//TODO
+	var reply int
+
+	outLog.Printf("Sending delete to coordinator")
+	err := c.Coordinator.Call("KVNode.CoordinatorDelete", &key, &reply)
+	if err != nil {
+		outLog.Println("Could not connect to coordinator: ", err)
+		return err
+	}
+	outLog.Printf("Successfully completed delete")
 	return nil
 }

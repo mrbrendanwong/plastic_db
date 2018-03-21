@@ -81,11 +81,11 @@ type WriteRequest struct {
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat         		uint32  `json:"heartbeat"`
-	VotingWait 				uint32 	`json:"voting-wait"`
-	ElectionWait 			uint32 	`json:"election-wait"`
-	ServerUpdateInterval 	uint32 	`json:"server-update-interval"`
-	MajorityThreshold 		float32 `json:"majority-threshold"`
+	HeartBeat            uint32  `json:"heartbeat"`
+	VotingWait           uint32  `json:"voting-wait"`
+	ElectionWait         uint32  `json:"election-wait"`
+	ServerUpdateInterval uint32  `json:"server-update-interval"`
+	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
 // Node Settings
@@ -245,14 +245,27 @@ func CreatePrimaryBackup() {
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func (n KVNode) Write(args *WriteRequest, _unused *int) error {
-	outLog.Println("Writing to KVStore")
+func (n KVNode) CoordinatorRead(key *string, value *string) error {
+	// TODO ask all nodes for their values (vote)
+	outLog.Println("Coordinator received read operation")
+	return nil
+}
+
+func (n KVNode) CoordinatorWrite(args *WriteRequest, _unused *int) error {
+	// TODO write to all nodes first
+	outLog.Println("Coordinator received write operation")
 	key := args.Key
 	value := args.Value
 	kvstore.Lock()
 	kvstore.store[key] = value
 	outLog.Printf("(%s, %s) is written to the KVSTORE\n", key, kvstore.store[key])
 	kvstore.Unlock()
+	return nil
+}
+
+func (n KVNode) CoordinatorDelete(key *string, _unused *int) error {
+	// TODO delete from all nodes first
+	outLog.Println("Coordinator received delete operation")
 	return nil
 }
 
