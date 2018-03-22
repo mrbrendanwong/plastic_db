@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"fmt"
 )
 
 ///////////////////////////////////////////////////////////////////////////
@@ -81,6 +82,24 @@ type CNode struct {
 	connected       bool
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// TYPES, STRUCTURES
+////////////////////////////////////////////////////////////////////////////////
+
+type WriteRequest struct {
+	Key   string
+	Value string
+}
+
+type WriteReply struct {
+	Success 	bool
+}
+
+///////////////////////////////////////////////////////////////////////////
+// CLIENT-COORDINATOR FUNCTIONS
+///////////////////////////////////////////////////////////////////////////
+
+// Connect to the coordinator
 func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error) {
 	// Connect to coordinatorNode
 	coordinator, err := rpc.Dial("tcp", coordinatorAddr)
@@ -95,10 +114,6 @@ func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error
 	return cNodeConn, nil
 }
 
-///////////////////////////////////////////////////////////////////////////
-// CLIENT-COORDINATOR FUNCTIONS
-///////////////////////////////////////////////////////////////////////////
-
 // Get value of key
 func (c CNode) Read(key string) (string, error) {
 	// TODO
@@ -108,21 +123,25 @@ func (c CNode) Read(key string) (string, error) {
 // Write value to key
 func (c CNode) Write(key, value string) error {
 	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
-	args := struct {
-		Key   string
-		Value string
-	}{
-		key,
-		value,
-	}
-	var reply int
+
+	args := &WriteRequest{Key: key, Value: value}
+	reply := WriteReply{}
+	
 	outLog.Printf("Sending write to coordinator")
-	err := c.Coordinator.Call("KVNode.Write", &args, &reply)
+	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
 		outLog.Println("Could not connect to coordinator: ", err)
 		return err
 	}
-	outLog.Printf("Successfully completed write to coordinator")
+
+	// Check if write was successful
+	if reply.Success {
+		outLog.Printf("Successfully completed write to coordinator")
+	} else {
+		outLog.Printf("Failed to write to coordinator...")
+		return MajorityWriteError("Failed to write to majority of nodes")
+	}
+
 	return nil
 }
 

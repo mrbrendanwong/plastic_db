@@ -18,6 +18,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	//"strconv"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -79,6 +80,10 @@ type WriteRequest struct {
 	Value string
 }
 
+type WriteReply struct {
+	Success 	bool
+}
+
 // Node Settings
 type NodeSettings struct {
 	HeartBeat         		uint32  `json:"heartbeat"`
@@ -114,6 +119,7 @@ type KVNode int
 ////////////////////////////////////////////////////////////////////////////////
 // SERVER <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+// Connects to the server to join or initiate the KV network
 func ConnectServer(serverAddr string) {
 	// Look up local addr to use for this node
 	var localAddr string
@@ -161,6 +167,7 @@ func ConnectServer(serverAddr string) {
 	return
 }
 
+// Registers a node to the server and receives a node ID 
 func RegisterNode() (err error) {
 	var regInfo RegistrationPackage
 
@@ -231,7 +238,7 @@ func MonitorHeartBeats(addr string) {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// COORDINATOR FUNCTION
+// COORDINATOR FUNCTION // Is this section needed anymore?
 ////////////////////////////////////////////////////////////////////////////////
 
 func AddNodeToNetwork() {
@@ -245,14 +252,76 @@ func CreatePrimaryBackup() {
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func (n KVNode) Write(args *WriteRequest, _unused *int) error {
-	outLog.Println("Writing to KVStore")
+
+// Writing a KV pair to the coordinator node
+func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// Attempt to write to backup nodes
+	successes := 0
+	outLog.Println("Attempting to write to back-up nodes...")
+	for _, node := range allNodes.nodes {
+		outLog.Printf("Writing to node %s...\n", node.ID)
+
+		nodeArgs := args
+		nodeReply := WriteReply{}
+
+		err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
+		if err != nil {
+			outLog.Println("Could node reach node ", node.Address.String())
+		}
+
+		// Record successes
+		if nodeReply.Success {
+			successes++
+			outLog.Printf("Successfully wrote to node %s!\n", node.ID)
+		} else {
+			outLog.Printf("Failed to write to node %s...\n", node.ID)
+		}
+	}
+
+	// Check if majority of writes suceeded
+	threshold := Settings.MajorityThreshold
+	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	outLog.Println("This is the back-up success ratio:", successRatio)
+
+	// Update coordinator
+	if successRatio >= threshold {
+		outLog.Println("Back up is successful! Updating coordinator KV store...")
+		kvstore.Lock()
+		defer kvstore.Unlock()
+
+		key := args.Key
+		value := args.Value
+		kvstore.store[key] = value
+		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
+
+		*reply = WriteReply{Success: true}
+	} else {
+		outLog.Println("Back up failed! Aborting write...")
+		// TODO Roll back all writes on network nodes
+		// Should we have a history structure?
+		// thresholdString := strconv.Itoa(threshold)
+		*reply = WriteReply{Success: false}
+	}
+
+	return nil
+}
+
+// Writing a KV pair to the network nodes
+func (n KVNode) NodeWrite(args WriteRequest, reply *WriteReply) error {
+	// TODO Keep current KVStore as history for rollback if needed
+	outLog.Println("Received write request from coordinator!")
 	key := args.Key
 	value := args.Value
 	kvstore.Lock()
+	defer kvstore.Unlock()
 	kvstore.store[key] = value
-	outLog.Printf("(%s, %s) is written to the KVSTORE\n", key, kvstore.store[key])
-	kvstore.Unlock()
+	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
+
+	*reply = WriteReply{Success: true}
+
 	return nil
 }
 
@@ -353,7 +422,7 @@ func (n KVNode) ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
 	}
 	allNodes.nodes[addr.String()].RecentHeartbeat = time.Now().UnixNano()
 
-	outLog.Println("Heartbeats received by ", addr.String())
+	//outLog.Println("Heartbeats received by ", addr.String())
 	return nil
 }
 
