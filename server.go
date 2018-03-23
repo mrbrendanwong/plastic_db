@@ -109,7 +109,13 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
+	ID 		string
 	Address net.Addr
+}
+
+type FailureInfo struct{
+	Failed		net.Addr
+	Reporter	net.Addr
 }
 
 // For RPC calls
@@ -181,6 +187,25 @@ func SetCoordinator() {
 // Send a Node to the coordinator to be set into the network
 func SendToCoordinator() {
 	return
+}
+
+// Report failed network node
+func (s KVServer) NodeFailureAlert(info *NodeInfo, _unused *int) error {
+	failedNode := info.Address
+
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	delete(allNodes.nodes, failedNode.String())
+	outLog.Println("Node removed from system: ", failedNode.String())
+
+	return nil
+}
+
+
+func (s KVServer) ReportCoordinatorFailure(node *FailureInfo, _unused *int) error {
+	outLog.Println("Reported failure of coordinator ", node.Failed, " received from ", node.Reporter)
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
