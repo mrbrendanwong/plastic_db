@@ -125,9 +125,7 @@ type AllFailures struct {
 type FailedNode struct {
 	timestamp	int64
 	address 	net.Addr
-	//votes		int
 	reporters	map[string]bool
-	//isFailure	chan bool
 }
 
 type NodeInfo struct {
@@ -285,13 +283,10 @@ func MonitorHeartBeats(addr string){
 			if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
 				allNodes.RLock()
 				if (isCoordinator) {
-					outLog.Println("Connection with ", addr, " timed out.")
 					SaveNodeFailure(allNodes.nodes[addr])
 				} else if (allNodes.nodes[addr].IsCoordinator) {
-					outLog.Println("Connection with coordinator timed out.")
 					ReportCoordinatorFailure(allNodes.nodes[addr])
 				} else {
-					outLog.Println("Connection with ", addr, " timed out.")
 					ReportNodeFailure(allNodes.nodes[addr])
 				}
 				allNodes.RUnlock()
@@ -362,7 +357,7 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 	outLog.Println("Failed node ", failure, " detected by ", reporter)
 
 	allFailures.Lock()
-	if node, ok := allFailures.nodes[failure.String()]; ok {				// TODO: do not increment vote if report from reporter node has already been received
+	if node, ok := allFailures.nodes[failure.String()]; ok {
 		if _, ok := node.reporters[reporter.String()]; !ok{
 			node.reporters[reporter.String()] = true
 		}

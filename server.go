@@ -71,6 +71,13 @@ var (
 	nextID             int = 0
 )
 
+
+// Variables for failures
+var(
+	allFailures		   AllFailures = AllFailures{nodes: make(map[string]bool)}
+	voteTimeout		   int64 = int64(time.Millisecond * 20000)
+
+)
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
@@ -117,6 +124,12 @@ type FailureInfo struct{
 	Failed		net.Addr
 	Reporter	net.Addr
 }
+
+type AllFailures struct {
+	sync.RWMutex
+	nodes map[string]bool
+}
+
 
 // For RPC calls
 type KVServer int
@@ -204,9 +217,50 @@ func (s KVServer) NodeFailureAlert(info *NodeInfo, _unused *int) error {
 
 
 func (s KVServer) ReportCoordinatorFailure(node *FailureInfo, _unused *int) error {
-	outLog.Println("Reported failure of coordinator ", node.Failed, " received from ", node.Reporter)
+
+	if len(allFailures.nodes) == 0 {
+		outLog.Println("First reported failure of coordinator ", node.Failed, " received from ", node.Reporter)
+		// First failure report, start listening for other reporting nodes
+		allFailures.nodes[node.Reporter.String()] = true
+		go DetectCoordinatorFailure(time.Now().UnixNano())
+
+	} else {
+		if _, ok := allFailures.nodes[node.Reporter.String()] ; !ok {
+			outLog.Println("Reported failure of coordinator ", node.Failed, " received from ", node.Reporter)
+
+			// if coordinator failure report has not yet been received by this reporter,
+			// save report
+			allFailures.nodes[node.Reporter.String()] = true
+		}
+	}
+
 	return nil
 }
+
+
+func DetectCoordinatorFailure(timestamp int64){
+
+	var didFail bool = false
+	quorum := getQuorumNum()
+
+	for time.Now().UnixNano() < timestamp + voteTimeout {
+		allFailures.RLock()
+		if len(allFailures.nodes) >= quorum {
+			//quorum reached, coordinator failed
+			didFail = true
+		}
+		allFailures.RUnlock()
+	}
+	if didFail {
+		// TODO: start voting session for new coordinator
+		outLog.Println("Quorum reports of coordinator reached.")
+	} else {
+		// timeout, reports are invalid
+		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
+	}
+	return
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // SERVER <-> CLIENT FUNCTIONS
@@ -231,6 +285,10 @@ func readConfigOrDie(path string) {
 
 	err = json.Unmarshal(buffer, &config)
 	handleErrorFatal("parse config", err)
+}
+
+func getQuorumNum() int {
+	return len(allNodes.nodes)/2 + 1
 }
 
 func main() {
