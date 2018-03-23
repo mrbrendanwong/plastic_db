@@ -86,11 +86,11 @@ type WriteReply struct {
 
 // Node Settings
 type NodeSettings struct {
-	HeartBeat         		uint32  `json:"heartbeat"`
-	VotingWait 				uint32 	`json:"voting-wait"`
-	ElectionWait 			uint32 	`json:"election-wait"`
-	ServerUpdateInterval 	uint32 	`json:"server-update-interval"`
-	MajorityThreshold 		float32 `json:"majority-threshold"`
+	HeartBeat            uint32  `json:"heartbeat"`
+	VotingWait           uint32  `json:"voting-wait"`
+	ElectionWait         uint32  `json:"election-wait"`
+	ServerUpdateInterval uint32  `json:"server-update-interval"`
+	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
 // Node Settings
@@ -132,6 +132,10 @@ func ConnectServer(serverAddr string) {
 	}
 	localAddr = fmt.Sprintf("%s%s", localAddr, ":0")
 	ln, err := net.Listen("tcp", localAddr)
+	if err != nil {
+		outLog.Printf("Failed to get a local addr:%s\n", err)
+		return
+	}
 	LocalAddr = ln.Addr()
 
 	// Connect to server
@@ -249,9 +253,20 @@ func CreatePrimaryBackup() {
 	return
 }
 
+func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
+	outLog.Println("Heartbeat request received from client.")
+	*reply = time.Now().UnixNano()
+	return nil
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+func (n KVNode) CoordinatorRead(key *string, value *string) error {
+	// TODO ask all nodes for their values (vote)
+	outLog.Println("Coordinator received read operation")
+	return nil
+}
 
 // Writing a KV pair to the coordinator node
 func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
@@ -322,6 +337,12 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *WriteReply) error {
 
 	*reply = WriteReply{Success: true}
 
+	return nil
+}
+
+func (n KVNode) CoordinatorDelete(key *string, _unused *int) error {
+	// TODO delete from all nodes first
+	outLog.Println("Coordinator received delete operation")
 	return nil
 }
 

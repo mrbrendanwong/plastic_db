@@ -2,6 +2,7 @@ package dkvlib
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/rpc"
 	"os"
@@ -74,6 +75,7 @@ type CNodeConn interface {
 	Write(key, value string) error
 	Update(key, value string) error
 	Delete(key string) error
+	SendHeartbeat() (int64, error)
 }
 
 type CNode struct {
@@ -116,8 +118,17 @@ func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error
 
 // Get value of key
 func (c CNode) Read(key string) (string, error) {
-	// TODO
-	return "", nil
+
+	var reply string
+
+	outLog.Printf("Sending read to coordinator")
+	err := c.Coordinator.Call("KVNode.CoordinatorRead", &key, &reply)
+	if err != nil {
+		outLog.Println("Could not complete read: ", err)
+		return "", err
+	}
+	outLog.Printf("Successfully completed read")
+	return reply, nil
 }
 
 // Write value to key
@@ -145,14 +156,24 @@ func (c CNode) Write(key, value string) error {
 	return nil
 }
 
-// Update value of key
-func (c CNode) Update(key, value string) error {
-	//TODO
+// Delete key-value pair
+func (c CNode) Delete(key string) error {
+	var reply int
+
+	outLog.Printf("Sending delete to coordinator")
+	err := c.Coordinator.Call("KVNode.CoordinatorDelete", &key, &reply)
+	if err != nil {
+		outLog.Println("Could not complete delete: ", err)
+		return err
+	}
+	outLog.Printf("Successfully completed delete")
 	return nil
 }
 
-// Delete key-value pair
-func (c CNode) Delete(key string) error {
-	//TODO
-	return nil
+// Check that RPC connection is still alive.
+func (c CNode) SendHeartbeat() (int64, error) {
+	var args int
+	var reply int64
+	err := c.Coordinator.Call("KVNode.SendHeartbeat", &args, &reply)
+	return reply, err
 }
