@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/rpc"
 	"os"
-	"fmt"
 )
 
 ///////////////////////////////////////////////////////////////////////////
@@ -73,7 +72,6 @@ var (
 type CNodeConn interface {
 	Read(key string) (string, error)
 	Write(key, value string) error
-	Update(key, value string) error
 	Delete(key string) error
 	SendHeartbeat() (int64, error)
 }
@@ -94,7 +92,7 @@ type WriteRequest struct {
 }
 
 type WriteReply struct {
-	Success 	bool
+	Success bool
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -137,7 +135,7 @@ func (c CNode) Write(key, value string) error {
 
 	args := &WriteRequest{Key: key, Value: value}
 	reply := WriteReply{}
-	
+
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
