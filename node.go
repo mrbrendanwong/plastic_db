@@ -18,7 +18,8 @@ import (
 	"os"
 	"sync"
 	"time"
-	//"strconv"
+	
+	"./dkvlib"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -75,15 +76,6 @@ type RegistrationPackage struct {
 	IsCoordinator bool
 }
 
-type WriteRequest struct {
-	Key   string
-	Value string
-}
-
-type WriteReply struct {
-	Success 	bool
-}
-
 // Node Settings
 type NodeSettings struct {
 	HeartBeat            uint32  `json:"heartbeat"`
@@ -115,6 +107,19 @@ type NodeInfo struct {
 
 // For RPC Calls
 type KVNode int
+
+type WriteRequest struct {
+	Key   string
+	Value string
+}
+
+type DeleteRequest struct {
+	Key   string
+}
+
+type OpReply struct {
+	Success 	bool
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // SERVER <-> NODE FUNCTION
@@ -244,17 +249,8 @@ func MonitorHeartBeats(addr string) {
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR FUNCTION // Is this section needed anymore?
 ////////////////////////////////////////////////////////////////////////////////
-
-func AddNodeToNetwork() {
-	return
-}
-
-func CreatePrimaryBackup() {
-	return
-}
-
 func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
-	outLog.Println("Heartbeat request received from client.")
+	//outLog.Println("Heartbeat request received from client.")
 	*reply = time.Now().UnixNano()
 	return nil
 }
@@ -269,7 +265,7 @@ func (n KVNode) CoordinatorRead(key *string, value *string) error {
 }
 
 // Writing a KV pair to the coordinator node
-func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
+func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -280,11 +276,11 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
 		outLog.Printf("Writing to node %s...\n", node.ID)
 
 		nodeArgs := args
-		nodeReply := WriteReply{}
+		nodeReply := OpReply{}
 
 		err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
 		if err != nil {
-			outLog.Println("Could node reach node ", node.Address.String())
+			outLog.Println("Could not write to node ", err)
 		}
 
 		// Record successes
@@ -299,7 +295,7 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
 	// Check if majority of writes suceeded
 	threshold := Settings.MajorityThreshold
 	successRatio := float32(successes) / float32(len(allNodes.nodes))
-	outLog.Println("This is the back-up success ratio:", successRatio)
+	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
 	if successRatio >= threshold {
@@ -312,37 +308,115 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
 		kvstore.store[key] = value
 		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 
-		*reply = WriteReply{Success: true}
+		*reply = OpReply{Success: true}
 	} else {
 		outLog.Println("Back up failed! Aborting write...")
 		// TODO Roll back all writes on network nodes
 		// Should we have a history structure?
 		// thresholdString := strconv.Itoa(threshold)
-		*reply = WriteReply{Success: false}
+		*reply = OpReply{Success: false}
 	}
 
 	return nil
 }
 
 // Writing a KV pair to the network nodes
-func (n KVNode) NodeWrite(args WriteRequest, reply *WriteReply) error {
+func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	// TODO Keep current KVStore as history for rollback if needed
 	outLog.Println("Received write request from coordinator!")
 	key := args.Key
 	value := args.Value
 	kvstore.Lock()
 	defer kvstore.Unlock()
+
 	kvstore.store[key] = value
 	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 
-	*reply = WriteReply{Success: true}
+	*reply = OpReply{Success: true}
 
 	return nil
 }
 
-func (n KVNode) CoordinatorDelete(key *string, _unused *int) error {
-	// TODO delete from all nodes first
-	outLog.Println("Coordinator received delete operation")
+// Deleting a KV pair from the coordinator node
+func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// Attempt delete from backup nodes
+	successes := 0
+	outLog.Println("Attempting to delete from back-up nodes...")
+	for _, node := range allNodes.nodes {
+		outLog.Printf("Deleting from node %s...\n", node.ID)
+
+		nodeArgs := args
+		nodeReply := OpReply{}
+
+		err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
+		if err != nil {
+			outLog.Println("Could not delete from node ", err)
+		}
+
+		// Record successes
+		if nodeReply.Success {
+			successes++
+			outLog.Printf("Successfully deleted from node %s!\n", node.ID)
+		} else {
+			outLog.Printf("Failed to delete from node %s...\n", node.ID)
+		}
+	}
+
+	// Check if majority of deletes suceeded
+	threshold := Settings.MajorityThreshold
+	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	outLog.Println("This is the delete success ratio:", successRatio)
+
+	// Update coordinator
+	if successRatio >= threshold {
+		outLog.Println("Delete from back-up is successful! Updating coordinator KV store...")
+		kvstore.Lock()
+		defer kvstore.Unlock()
+
+		key := args.Key
+		value := kvstore.store[key]
+		if _, ok := kvstore.store[key]; ok {
+			delete(kvstore.store, key)
+		} else {
+			return dkvlib.NonexistentKeyError(key)
+		}
+
+		outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+
+		*reply = OpReply{Success: true}
+	} else {
+		outLog.Println("Delete from network failed! Aborting delete...")
+		// TODO Roll back all deletes on network nodes
+		// Should we have a history structure?
+		// thresholdString := strconv.Itoa(threshold)
+		*reply = OpReply{Success: false}
+	}
+
+	return nil
+}
+
+// Deleting a KV pair from the network nodes
+func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
+	// TODO Keep current KVStore as history for rollback if needed
+	outLog.Println("Received delete request from coordinator!")
+	kvstore.Lock()
+	defer kvstore.Unlock()
+
+	key := args.Key
+	value := kvstore.store[key]
+	if _, ok := kvstore.store[key]; ok {
+		delete(kvstore.store, key)
+	} else {
+		outLog.Printf("Key %s does not exist in store!\n", key)
+		return dkvlib.NonexistentKeyError(key)
+	}
+	outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+
+	*reply = OpReply{Success: true}
+
 	return nil
 }
 

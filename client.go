@@ -126,19 +126,22 @@ func main() {
 	if err != nil {
 		outLog.Println("Write failed")
 	}
+
 	val, error := coordinator.Read("a")
 	if error != nil {
 		outLog.Println("Read failed")
 	} else {
 		outLog.Printf("Value returned: %s", val)
 	}
+	
 	err = coordinator.Delete("a")
 	if err != nil {
 		outLog.Println("Delete failed")
 	}
 
-	// For testing
-	for {
+	err = coordinator.Delete("a")
+	if err != nil {
+		outLog.Println("Delete failed")
 	}
 
 }
