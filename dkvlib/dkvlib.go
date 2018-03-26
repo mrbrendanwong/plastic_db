@@ -86,6 +86,15 @@ type CNode struct {
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
 
+type ReadRequest struct {
+	Key string
+}
+
+type ReadReply struct {
+	Value string
+	Error error
+}
+
 type WriteRequest struct {
 	Key   string
 	Value string
@@ -121,16 +130,21 @@ func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error
 // Get value of key
 func (c CNode) Read(key string) (string, error) {
 
-	var reply string
+	args := &ReadRequest{Key: key}
+	reply := ReadReply{}
 
 	outLog.Printf("Sending read to coordinator")
-	err := c.Coordinator.Call("KVNode.CoordinatorRead", &key, &reply)
+	err := c.Coordinator.Call("KVNode.CoordinatorRead", args, &reply)
 	if err != nil {
 		outLog.Println("Could not complete read: ", err)
 		return "", err
 	}
+	if reply.Error != nil {
+		outLog.Println("Could not complete read: ", reply.Error)
+		return "", reply.Error
+	}
 	outLog.Printf("Successfully completed read")
-	return reply, nil
+	return reply.Value, nil
 }
 
 // Write value to key

@@ -11,7 +11,7 @@ package main
 
 import (
 	"encoding/gob"
-	//"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -153,6 +153,15 @@ type CoordinatorFailureInfo struct {
 
 // For RPC Calls
 type KVNode int
+
+type ReadRequest struct {
+	Key string
+}
+
+type ReadReply struct {
+	Value string
+	Error error
+}
 
 type WriteRequest struct {
 	Key   string
@@ -637,9 +646,76 @@ func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func (n KVNode) CoordinatorRead(key *string, value *string) error {
-	// TODO ask all nodes for their values (vote)
+func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	outLog.Println("Coordinator received read operation")
+
+	// TODO ask all nodes for their values (vote)
+	//map of values to their count
+	valuesMap := make(map[string]int)
+
+	allNodes.Lock()
+
+	outLog.Println("Attempting to read back-up nodes...")
+	for _, node := range allNodes.nodes {
+		outLog.Printf("Writing to node %s...\n", node.ID)
+
+		nodeArgs := args
+		nodeReply := ReadReply{}
+
+		err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
+		if err != nil {
+			outLog.Println("Could node reach node ", node.Address.String())
+		}
+
+		// Record successes
+		if nodeReply.Error != nil {
+			outLog.Printf("Failed to read from node %s... %v\n", node.ID, nodeReply.Error)
+		} else {
+			outLog.Printf("Successfully read from node %s...\n", node.ID)
+			addToValuesMap(valuesMap, nodeReply.Value)
+		}
+	}
+
+	defer allNodes.Unlock()
+
+	// Find value with most votes
+	// TODO account for ties
+	var result string
+	largestCount := 0
+	for val, count := range valuesMap {
+		if count > largestCount {
+			largestCount = count
+			result = val
+		}
+	}
+
+	reply.Value = result
+	reply.Error = nil
+
+	return nil
+}
+
+func addToValuesMap(valuesMap map[string]int, val string) {
+	_, ok := valuesMap[val]
+	if ok {
+		valuesMap[val] = valuesMap[val] + 1
+	} else {
+		valuesMap[val] = 1
+	}
+}
+
+func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
+	kvstore.RLock()
+	val, ok := kvstore.store[args.Key]
+
+	kvstore.RUnlock()
+	if !ok {
+		reply.Error = errors.New("Key does not exist at this node")
+		reply.Value = ""
+	} else {
+		reply.Error = nil
+		reply.Value = val
+	}
 	return nil
 }
 
