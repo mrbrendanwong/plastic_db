@@ -41,10 +41,10 @@ func (e CoordinatorWriteError) Error() string {
 	return fmt.Sprintf("DKV: Could not write to the coordinator node. Write failed [%s]", string(e))
 }
 
-type MajorityWriteError string
+type MajorityOpError string
 
-func (e MajorityWriteError) Error() string {
-	return fmt.Sprintf("DKV: Could not write to a majority of network nodes. Write failed [%s]", string(e))
+func (e MajorityOpError) Error() string {
+	return fmt.Sprintf("DKV: Could not complete operation on a majority of network nodes. Operation failed [%s]", string(e))
 }
 
 type NonexistentKeyError string
@@ -91,8 +91,12 @@ type WriteRequest struct {
 	Value string
 }
 
-type WriteReply struct {
-	Success bool
+type DeleteRequest struct {
+	Key   string
+}
+
+type OpReply struct {
+	Success 	bool
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -134,8 +138,8 @@ func (c CNode) Write(key, value string) error {
 	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 
 	args := &WriteRequest{Key: key, Value: value}
-	reply := WriteReply{}
-
+	reply := OpReply{}
+	
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
@@ -145,10 +149,10 @@ func (c CNode) Write(key, value string) error {
 
 	// Check if write was successful
 	if reply.Success {
-		outLog.Printf("Successfully completed write to coordinator")
+		outLog.Println("Successfully completed write to coordinator")
 	} else {
-		outLog.Printf("Failed to write to coordinator...")
-		return MajorityWriteError("Failed to write to majority of nodes")
+		outLog.Println("Failed to write to coordinator...")
+		return MajorityOpError("Failed to write to majority of nodes")
 	}
 
 	return nil
@@ -156,15 +160,26 @@ func (c CNode) Write(key, value string) error {
 
 // Delete key-value pair
 func (c CNode) Delete(key string) error {
-	var reply int
+	outLog.Printf("DELETING KEY: %s\n", key)
+
+	args := &DeleteRequest{Key: key}
+	reply := OpReply{}
 
 	outLog.Printf("Sending delete to coordinator")
-	err := c.Coordinator.Call("KVNode.CoordinatorDelete", &key, &reply)
+	err := c.Coordinator.Call("KVNode.CoordinatorDelete", args, &reply)
 	if err != nil {
 		outLog.Println("Could not complete delete: ", err)
 		return err
 	}
-	outLog.Printf("Successfully completed delete")
+
+	// Check if delete was ssuccessful
+	if reply.Success {
+		outLog.Println("Successfully completed delete")
+	} else {
+		outLog.Println("Failed to delete from coordinator...")
+		return MajorityOpError("Failed to delete to majority of nodes")
+	}
+	
 	return nil
 }
 
