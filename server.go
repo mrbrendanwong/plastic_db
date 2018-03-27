@@ -290,7 +290,7 @@ func DetectCoordinatorFailure(timestamp int64){
 		allFailures.RUnlock()
 	}
 	if didFail {
-		// start voting session for new coordinator
+		// tally up votes
 		ElectCoordinator()
 
 		// Remove node from list of nodes
