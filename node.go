@@ -563,9 +563,6 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 		*reply = OpReply{Success: true}
 	} else {
 		outLog.Println("Back up failed! Aborting write...")
-		// TODO Roll back all writes on network nodes
-		// Should we have a history structure?
-		// thresholdString := strconv.Itoa(threshold)
 		*reply = OpReply{Success: false}
 	}
 
@@ -574,7 +571,6 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 
 // Writing a KV pair to the network nodes
 func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
-	// TODO Keep current KVStore as history for rollback if needed
 	outLog.Println("Received write request from coordinator!")
 	key := args.Key
 	value := args.Value
@@ -641,9 +637,6 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 		*reply = OpReply{Success: true}
 	} else {
 		outLog.Println("Delete from network failed! Aborting delete...")
-		// TODO Roll back all deletes on network nodes
-		// Should we have a history structure?
-		// thresholdString := strconv.Itoa(threshold)
 		*reply = OpReply{Success: false}
 	}
 
@@ -652,7 +645,6 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 
 // Deleting a KV pair from the network nodes
 func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
-	// TODO Keep current KVStore as history for rollback if needed
 	outLog.Println("Received delete request from coordinator!")
 	kvstore.Lock()
 	defer kvstore.Unlock()
