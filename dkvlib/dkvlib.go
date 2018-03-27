@@ -91,12 +91,17 @@ type WriteRequest struct {
 	Value string
 }
 
+<<<<<<< HEAD
 type DeleteRequest struct {
 	Key   string
 }
 
 type OpReply struct {
 	Success 	bool
+=======
+type WriteReply struct {
+	Success bool
+>>>>>>> dev
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -138,8 +143,13 @@ func (c CNode) Write(key, value string) error {
 	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 
 	args := &WriteRequest{Key: key, Value: value}
+<<<<<<< HEAD
 	reply := OpReply{}
 	
+=======
+	reply := WriteReply{}
+
+>>>>>>> dev
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
