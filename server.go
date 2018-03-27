@@ -71,6 +71,15 @@ var (
 	nextID             int = 0
 )
 
+
+// Variables for failures
+var(
+	voteInPlace		   bool 		/* block communication with client when true */
+	allFailures		   AllFailures = AllFailures{nodes: make(map[string]bool)}
+	allVotes		   AllVotes = AllVotes{votes: make(map[string]int)}
+	voteTimeout		   int64 = int64(time.Millisecond * 20000)
+
+)
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
@@ -113,9 +122,20 @@ type NodeInfo struct {
 	Address net.Addr
 }
 
-type FailureInfo struct{
-	Failed		net.Addr
-	Reporter	net.Addr
+type CoordinatorFailureInfo struct{
+	Failed			net.Addr
+	Reporter		net.Addr
+	NewCoordinator	net.Addr
+}
+
+type AllFailures struct {
+	sync.RWMutex
+	nodes map[string]bool
+}
+
+type AllVotes struct {
+	sync.RWMutex
+	votes map[string]int
 }
 
 // For RPC calls
@@ -202,10 +222,135 @@ func (s KVServer) NodeFailureAlert(info *NodeInfo, _unused *int) error {
 	return nil
 }
 
+// Incoming coordinator failure report from network node
+func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused *int) error {
+	failed := info.Failed
+	reporter := info.Reporter
+	voted := info.NewCoordinator
 
-func (s KVServer) ReportCoordinatorFailure(node *FailureInfo, _unused *int) error {
-	outLog.Println("Reported failure of coordinator ", node.Failed, " received from ", node.Reporter)
+
+	if len(allFailures.nodes) == 0 {
+		voteInPlace = true
+		outLog.Println("First reported failure of coordinator ", failed, " received from ", reporter)
+
+		// First failure report, start listening for other reporting nodes
+		allFailures.nodes[reporter.String()] = true
+
+		// acknowledge vote
+		castVote(voted.String())
+		go DetectCoordinatorFailure(time.Now().UnixNano())
+
+	} else {
+		if _, ok := allFailures.nodes[reporter.String()] ; !ok {
+			outLog.Println("Reported failure of coordinator ", failed, " received from ", reporter)
+
+			// if coordinator failure report has not yet been received by this reporter,
+			// save report
+			allFailures.nodes[reporter.String()] = true
+
+			// save vote
+			castVote(voted.String())
+		}
+	}
+
 	return nil
+}
+
+// TODO: Called when server fails to receive heartbeats from coordinator
+func CoordinatorConnectionFailure(){
+	if len(allFailures.nodes) == 0 {
+		voteInPlace = true
+		outLog.Println("First report failures of coordinator.")
+
+		allFailures.nodes[config.ServerAddress] = true
+		go DetectCoordinatorFailure(time.Now().UnixNano())
+	} else {
+		if _, ok := allFailures.nodes[config.ServerAddress] ; !ok {
+			allFailures.nodes[config.ServerAddress] = true
+
+			// TODO: vote network node with the lowest id to be new coordinator
+		}
+	}
+}
+
+// Listen for quorum number of failure reports
+func DetectCoordinatorFailure(timestamp int64){
+
+	var didFail bool = false
+	quorum := getQuorumNum()
+
+	for time.Now().UnixNano() < timestamp + voteTimeout {
+		allFailures.RLock()
+		if len(allFailures.nodes) >= quorum {
+			//quorum reached, coordinator failed
+			didFail = true
+			allFailures.RUnlock()
+			break
+		}
+		allFailures.RUnlock()
+	}
+	if didFail {
+		// tally up votes
+		ElectCoordinator()
+
+		// Remove node from list of nodes
+		allNodes.Lock()
+		delete(allNodes.nodes, currentCoordinator.Address.String())
+		allNodes.Unlock()
+		outLog.Println("Quorum reports of coordinator reached.")
+
+		// TODO: broadcast new coordinator
+
+	} else {
+		// timeout, reports are invalid
+		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
+	}
+
+	// clear map of failures
+	allFailures.nodes = make(map[string]bool)
+	return
+}
+
+
+////////////////////////////////////////////////////////////////////////////////
+// COORDINATOR ELECTION
+////////////////////////////////////////////////////////////////////////////////
+func ElectCoordinator() string {
+	allVotes.RLock()
+	defer allVotes.RUnlock()
+
+	var maxVotes int
+	var electedCoordinator string
+	mostPopular := []string{}
+
+
+	for node, numVotes := range allVotes.votes{
+		if len(mostPopular) == 0 {						// append first node of list
+			mostPopular = append(mostPopular, node)
+			maxVotes = numVotes
+		} else if numVotes > maxVotes {					// if current node has more votes than the ones seen before, replace entire list with this node
+			mostPopular = nil
+			mostPopular = append(mostPopular, node)
+		} else if numVotes == maxVotes {				// if current node has the max number of notes, add to list
+			mostPopular = append(mostPopular, node)
+		}
+	}
+
+	if len(mostPopular) > 1 {
+		// if there is a tie, elect randomly
+		rand.Seed(time.Now().UnixNano())
+		index  := rand.Intn(len(mostPopular) - 1)
+		electedCoordinator = mostPopular[index]
+		outLog.Println("Tie exists.  Randomly elected new coordinator: ", electedCoordinator)
+		return electedCoordinator
+	}
+
+	electedCoordinator = mostPopular[0]
+	outLog.Println("New coordinator elected: ", electedCoordinator)
+	return electedCoordinator
+
+
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -231,6 +376,23 @@ func readConfigOrDie(path string) {
 
 	err = json.Unmarshal(buffer, &config)
 	handleErrorFatal("parse config", err)
+}
+
+func getQuorumNum() int {
+	return len(allNodes.nodes)/2 + 1
+}
+
+func castVote (addr string) {
+	allVotes.Lock()
+	defer allVotes.Unlock()
+
+	if _, ok := allVotes.votes[addr] ; ok {
+		allVotes.votes[addr]++
+	} else {
+		allVotes.votes[addr] = 1
+	}
+
+	outLog.Println("Vote for " , addr , " casted.")
 }
 
 func main() {

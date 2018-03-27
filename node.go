@@ -18,7 +18,7 @@ import (
 	"os"
 	"sync"
 	"time"
-	//"strconv"
+	"strconv"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51,22 +51,22 @@ var (
 
 // Variable related to the node
 var (
-	LocalAddr     net.Addr
-	Server        *rpc.Client
-	Coordinator	  *rpc.Client
-	allNodes      AllNodes = AllNodes{nodes: make(map[string]*Node)}
-	isCoordinator bool
-	Settings      NodeSettings
-	ID            string
-	kvstore       KVStore = KVStore{store: make(map[string]string)}
+	LocalAddr     		net.Addr
+	Server        		*rpc.Client
+	Coordinator	  		*rpc.Client
+	allNodes      		AllNodes = AllNodes{nodes: make(map[string]*Node)}
+	isCoordinator 		bool
+	Settings      		NodeSettings
+	ID            		string
+	coordinatorFailed	bool = false
+	kvstore       		KVStore = KVStore{store: make(map[string]string)}
 )
 
 
 // For coordinator
 var (
-	allFailures  	AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
-	voteTimeout		int64 = int64(time.Millisecond * 20000)
-
+	allFailures  		AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
+	voteTimeout			int64 = int64(time.Millisecond * 20000)
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -125,9 +125,7 @@ type AllFailures struct {
 type FailedNode struct {
 	timestamp	int64
 	address 	net.Addr
-	//votes		int
 	reporters	map[string]bool
-	//isFailure	chan bool
 }
 
 type NodeInfo struct {
@@ -136,8 +134,14 @@ type NodeInfo struct {
 }
 
 type FailureInfo struct {
-	Failed		net.Addr
-	Reporter	net.Addr
+	Failed			net.Addr
+	Reporter		net.Addr
+}
+
+type CoordinatorFailureInfo struct {
+	Failed			net.Addr
+	Reporter		net.Addr
+	NewCoordinator	net.Addr
 }
 
 // For RPC Calls
@@ -231,8 +235,9 @@ func GetNodes() (err error) {
 	if err != nil {
 		outLog.Println("Error getting existing nodes from server")
 	} else {
-		for _, node := range nodeSet {
+		for id, node := range nodeSet {
 			if node.Address.String() != LocalAddr.String() {
+				node.ID = id
 				ConnectNode(node)
 			}
 		}
@@ -255,15 +260,20 @@ func ReportNodeFailure(node *Node){
 func ReportCoordinatorFailure(node *Node){
 	// If connection with server has failed, reconnect
 
-	info := &FailureInfo{
+	vote := voteNewCoordinator()
+
+	info := &CoordinatorFailureInfo{
 		Failed: node.Address,
 		Reporter: LocalAddr,
+		NewCoordinator: vote,
 	}
 
 	var reply int
 	err := Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of coordinator ", node.Address)
+	} else {
+		coordinatorFailed = true
 	}
 }
 
@@ -285,13 +295,10 @@ func MonitorHeartBeats(addr string){
 			if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
 				allNodes.RLock()
 				if (isCoordinator) {
-					outLog.Println("Connection with ", addr, " timed out.")
 					SaveNodeFailure(allNodes.nodes[addr])
-				} else if (allNodes.nodes[addr].IsCoordinator) {
-					outLog.Println("Connection with coordinator timed out.")
+				} else if allNodes.nodes[addr].IsCoordinator && coordinatorFailed == false {
 					ReportCoordinatorFailure(allNodes.nodes[addr])
 				} else {
-					outLog.Println("Connection with ", addr, " timed out.")
 					ReportNodeFailure(allNodes.nodes[addr])
 				}
 				allNodes.RUnlock()
@@ -362,7 +369,7 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 	outLog.Println("Failed node ", failure, " detected by ", reporter)
 
 	allFailures.Lock()
-	if node, ok := allFailures.nodes[failure.String()]; ok {				// TODO: do not increment vote if report from reporter node has already been received
+	if node, ok := allFailures.nodes[failure.String()]; ok {
 		if _, ok := node.reporters[reporter.String()]; !ok{
 			node.reporters[reporter.String()] = true
 		}
@@ -458,6 +465,39 @@ func getQuorumNum() int {
 	defer allNodes.RUnlock()
 	return len(allNodes.nodes) / 2 + 1
 }
+
+
+// Vote for who they think should be the new coordinator
+func voteNewCoordinator() net.Addr {
+	allNodes.RLock()
+	defer allNodes.RUnlock()
+
+	lowestID, err := strconv.Atoi(ID)							// get current node's id
+	if err != nil{
+		outLog.Println("Error retrieving local id.")
+	}
+	vote := LocalAddr
+
+	// Look for the node with the lowest ID
+	for _, node := range allNodes.nodes{
+		if node.IsCoordinator {
+			continue							// Do not vote for current coordinator
+		}
+		id, err := strconv.Atoi(node.ID)
+		if err != nil {
+			outLog.Println("Error retreiving node ID. ", node.Address, " ID: ", node.ID )
+		}
+
+		if id < lowestID {
+			lowestID = id
+			vote = node.Address
+		}
+	}
+
+	outLog.Println("Voting for ", vote, " as new coordinator.")
+	return vote
+}
+
 
 func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
 	outLog.Println("Heartbeat request received from client.")
@@ -573,9 +613,12 @@ func ConnectNode(node *Node) error {
 	}
 
 	// Set up reverse connection
-	args := &NodeInfo{Address: LocalAddr}
+	args := &NodeInfo{
+		Address: LocalAddr,
+		ID: ID,
+		}
 	var reply int
-	err = nodeConn.Call("KVNode.RegisterNode", args, &reply)
+	err = nodeConn.Call("KVNode.RegisterNode", &args, &reply)
 	if err != nil {
 		outLog.Println("Could not initate connection with node: ", nodeAddr.String())
 		return err
@@ -601,7 +644,7 @@ func (n KVNode) RegisterNode(args *NodeInfo, _unused *int) error {
 	addr := args.Address
 	id := args.ID
 
-	outLog.Println("Attempting to establish return connection")
+	//outLog.Println("Attempting to establish return connection")
 	conn, err := rpc.Dial("tcp", addr.String())
 
 	if err != nil {
@@ -620,7 +663,7 @@ func (n KVNode) RegisterNode(args *NodeInfo, _unused *int) error {
 		conn,
 	}
 	allNodes.Unlock()
-	outLog.Println("Return connection with node succeeded: ", addr.String())
+	outLog.Println("Return connection with node succeeded: ", addr.String(), "ID: ", id)
 
 	go sendHeartBeats(addr.String())
 
