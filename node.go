@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 	"strconv"
+	
+	"./dkvlib"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -39,6 +41,13 @@ func (e DisconnectedServerError) Error() string {
 	return fmt.Sprintf("Node: Cannot connect to server [%s]", string(e))
 }
 
+type InvalidFailureError string
+
+func (e InvalidFailureError) Error() string {
+	return fmt.Sprintf("Server: Failure Alert invalid. Ignoring. [%s]", string(e))
+}
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ////////////////////////////////////////////////////////////////////////////////
@@ -52,8 +61,9 @@ var (
 // Variable related to the node
 var (
 	LocalAddr     		net.Addr
+	ServerAddr			string
 	Server        		*rpc.Client
-	Coordinator	  		*rpc.Client
+	Coordinator	  		*Node
 	allNodes      		AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	isCoordinator 		bool
 	Settings      		NodeSettings
@@ -82,15 +92,6 @@ type RegistrationPackage struct {
 	Settings      NodeSettings
 	ID            string
 	IsCoordinator bool
-}
-
-type WriteRequest struct {
-	Key   string
-	Value string
-}
-
-type WriteReply struct {
-	Success 	bool
 }
 
 // Node Settings
@@ -147,6 +148,19 @@ type CoordinatorFailureInfo struct {
 // For RPC Calls
 type KVNode int
 
+type WriteRequest struct {
+	Key   string
+	Value string
+}
+
+type DeleteRequest struct {
+	Key   string
+}
+
+type OpReply struct {
+	Success 	bool
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // SERVER <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
@@ -188,6 +202,18 @@ func ConnectServer(serverAddr string) {
 
 	// Connect to existing nodes
 	GetNodes()
+
+	// Save address to reconnect
+	ServerAddr = serverAddr
+
+	// Close server connection
+	outLog.Printf("Closing connection to server...")
+	err = Server.Close()
+	if err != nil {
+		outLog.Println("Server connection already closing:", err)
+	} else {
+		outLog.Printf("Server connection successfully closed! Network node ready!")
+	}
 
 	// Listen for other incoming nodes
 	kvNode := new(KVNode)
@@ -251,7 +277,7 @@ func ReportNodeFailure(node *Node){
 		Reporter: LocalAddr,
 	}
 	var reply int
-	err := Coordinator.Call("KVNode.ReportNodeFailure", &info, &reply)
+	err := Coordinator.NodeConn.Call("KVNode.ReportNodeFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of node ", node.Address)
 	}
@@ -259,7 +285,24 @@ func ReportNodeFailure(node *Node){
 
 func ReportCoordinatorFailure(node *Node){
 	// If connection with server has failed, reconnect
+	Server, err := rpc.Dial("tcp", ServerAddr)
+	if err != nil {
+		outLog.Println("Failed to reconnect with server.")
+		// TODO: what do we do if we can't communicate with the server?
+		return
+	}
+
+	outLog.Println("Reconnected with server.")
+
 	vote := voteNewCoordinator()
+
+	allNodes.RLock()
+	if _, ok := allNodes.nodes[node.Address.String()] ; !ok {
+		outLog.Println("Node does not exist.  Aborting coordinator failure alert.")
+		allNodes.RUnlock()
+		return
+	}
+	allNodes.RUnlock()
 
 	info := &CoordinatorFailureInfo{
 		Failed: node.Address,
@@ -268,7 +311,7 @@ func ReportCoordinatorFailure(node *Node){
 	}
 
 	var reply int
-	err := Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
+	err = Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of coordinator ", node.Address)
 	} else {
@@ -281,12 +324,13 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 	addr := args.Address
 	outLog.Println("Received new coordinator... ", addr )
 
+	delete(allNodes.nodes, Coordinator.Address.String())
 	if addr.String() == LocalAddr.String() {
 		outLog.Println("I am the new coordinator!")
 		isCoordinator = true
 	} else {
 		allNodes.nodes[addr.String()].IsCoordinator = true
-		Coordinator = allNodes.nodes[addr.String()].NodeConn
+		Coordinator = allNodes.nodes[addr.String()]
 		outLog.Println(addr , " is the new coordinator.")
 	}
 
@@ -298,9 +342,6 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 ////////////////////////////////////////////////////////////////////////////////
 // NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func ConnectToCoordinator() {
-	return
-}
 
 // Check for heartbeat timeouts from other nodes
 func MonitorHeartBeats(addr string){
@@ -340,17 +381,8 @@ func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
 	return nil
 }
 ////////////////////////////////////////////////////////////////////////////////
-// COORDINATOR FUNCTION // Is this section needed anymore?
+// COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-
-func AddNodeToNetwork() {
-	return
-}
-
-func CreatePrimaryBackup() {
-	return
-}
-
 // Coordinator has observed failure of a node
 func SaveNodeFailure(node *Node){
 	addr := node.Address
@@ -392,6 +424,13 @@ func (n KVNode) ReportNodeFailure( info *FailureInfo, _unused *int ) error{
 		outLog.Println(len(node.reporters), "votes received for ", failure)
 		allFailures.Unlock()
 	} else {
+		// Check that this node actually exists
+		allNodes.RLock()
+		if _, ok := allNodes.nodes[failure.String()]; !ok {
+			outLog.Println("Node does not exist in network.  Ignoring failure report.")
+			return InvalidFailureError(failure.String())
+		}
+
 		// first detection of failure
 		reporters := make(map[string]bool)
 		reporters[reporter.String()] = true
@@ -467,7 +506,7 @@ func RemoveNode(node net.Addr){
 	// send failure acknowledgement to server
 	err := Server.Call("KVServer.NodeFailureAlert", &args, &reply)
 	if err != nil {
-		outLog.Println("Failure alert to server failed")
+		outLog.Println("Failure alert to server failed", err)
 	}
 }
 
@@ -514,9 +553,8 @@ func voteNewCoordinator() net.Addr {
 	return vote
 }
 
-
 func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
-	outLog.Println("Heartbeat request received from client.")
+	//outLog.Println("Heartbeat request received from client.")
 	*reply = time.Now().UnixNano()
 	return nil
 }
@@ -531,7 +569,7 @@ func (n KVNode) CoordinatorRead(key *string, value *string) error {
 }
 
 // Writing a KV pair to the coordinator node
-func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
+func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -542,11 +580,11 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
 		outLog.Printf("Writing to node %s...\n", node.ID)
 
 		nodeArgs := args
-		nodeReply := WriteReply{}
+		nodeReply := OpReply{}
 
 		err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
 		if err != nil {
-			outLog.Println("Could node reach node ", node.Address.String())
+			outLog.Println("Could not write to node ", err)
 		}
 
 		// Record successes
@@ -561,7 +599,7 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
 	// Check if majority of writes suceeded
 	threshold := Settings.MajorityThreshold
 	successRatio := float32(successes) / float32(len(allNodes.nodes))
-	outLog.Println("This is the back-up success ratio:", successRatio)
+	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
 	if successRatio >= threshold {
@@ -574,37 +612,107 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *WriteReply) error {
 		kvstore.store[key] = value
 		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 
-		*reply = WriteReply{Success: true}
+		*reply = OpReply{Success: true}
 	} else {
 		outLog.Println("Back up failed! Aborting write...")
-		// TODO Roll back all writes on network nodes
-		// Should we have a history structure?
-		// thresholdString := strconv.Itoa(threshold)
-		*reply = WriteReply{Success: false}
+		*reply = OpReply{Success: false}
 	}
 
 	return nil
 }
 
 // Writing a KV pair to the network nodes
-func (n KVNode) NodeWrite(args WriteRequest, reply *WriteReply) error {
-	// TODO Keep current KVStore as history for rollback if needed
+func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	outLog.Println("Received write request from coordinator!")
 	key := args.Key
 	value := args.Value
 	kvstore.Lock()
 	defer kvstore.Unlock()
+
 	kvstore.store[key] = value
 	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 
-	*reply = WriteReply{Success: true}
+	*reply = OpReply{Success: true}
 
 	return nil
 }
 
-func (n KVNode) CoordinatorDelete(key *string, _unused *int) error {
-	// TODO delete from all nodes first
-	outLog.Println("Coordinator received delete operation")
+// Deleting a KV pair from the coordinator node
+func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// Attempt delete from backup nodes
+	successes := 0
+	outLog.Println("Attempting to delete from back-up nodes...")
+	for _, node := range allNodes.nodes {
+		outLog.Printf("Deleting from node %s...\n", node.ID)
+
+		nodeArgs := args
+		nodeReply := OpReply{}
+
+		err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
+		if err != nil {
+			outLog.Println("Could not delete from node ", err)
+		}
+
+		// Record successes
+		if nodeReply.Success {
+			successes++
+			outLog.Printf("Successfully deleted from node %s!\n", node.ID)
+		} else {
+			outLog.Printf("Failed to delete from node %s...\n", node.ID)
+		}
+	}
+
+	// Check if majority of deletes suceeded
+	threshold := Settings.MajorityThreshold
+	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	outLog.Println("This is the delete success ratio:", successRatio)
+
+	// Update coordinator
+	if successRatio >= threshold {
+		outLog.Println("Delete from back-up is successful! Updating coordinator KV store...")
+		kvstore.Lock()
+		defer kvstore.Unlock()
+
+		key := args.Key
+		value := kvstore.store[key]
+		if _, ok := kvstore.store[key]; ok {
+			delete(kvstore.store, key)
+		} else {
+			return dkvlib.NonexistentKeyError(key)
+		}
+
+		outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+
+		*reply = OpReply{Success: true}
+	} else {
+		outLog.Println("Delete from network failed! Aborting delete...")
+		*reply = OpReply{Success: false}
+	}
+
+	return nil
+}
+
+// Deleting a KV pair from the network nodes
+func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
+	outLog.Println("Received delete request from coordinator!")
+	kvstore.Lock()
+	defer kvstore.Unlock()
+
+	key := args.Key
+	value := kvstore.store[key]
+	if _, ok := kvstore.store[key]; ok {
+		delete(kvstore.store, key)
+	} else {
+		outLog.Printf("Key %s does not exist in store!\n", key)
+		return dkvlib.NonexistentKeyError(key)
+	}
+	outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+
+	*reply = OpReply{Success: true}
+
 	return nil
 }
 ////////////////////////////////////////////////////////////////////////////////
@@ -625,7 +733,7 @@ func ConnectNode(node *Node) error {
 
 	// Save coordinator
 	if node.IsCoordinator {
-		Coordinator = nodeConn
+		Coordinator = node
 	}
 
 	// Set up reverse connection
