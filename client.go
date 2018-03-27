@@ -122,21 +122,25 @@ func main() {
 	go getHeartbeat(coordinator, 2*time.Second)
 
 	// Call functions on API
-	err = coordinator.Write("a", "5")
+	err = coordinator.Write("b", "7")
 	if err != nil {
-		outLog.Println("Write failed")
+		outLog.Println(err)
+	} else {
+		outLog.Println("Write Succeeded")
 	}
 
 	val, error := coordinator.Read("a")
 	if error != nil {
-		outLog.Println("Read failed")
+		outLog.Println(error)
 	} else {
 		outLog.Printf("Value returned: %s", val)
 	}
 	
 	err = coordinator.Delete("a")
 	if err != nil {
-		outLog.Println("Delete failed")
+		outLog.Println(err)
+	} else {
+		outLog.Println("Delete succeeded")
 	}
 
 	err = coordinator.Delete("a")

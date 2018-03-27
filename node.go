@@ -11,9 +11,10 @@ package main
 
 import (
 	"encoding/gob"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"net/rpc"
 	"os"
@@ -649,27 +650,34 @@ func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
 func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	outLog.Println("Coordinator received read operation")
 
-	// TODO ask all nodes for their values (vote)
-	//map of values to their count
+	// ask all nodes for their values (vote)
+	// map of values to their count
 	valuesMap := make(map[string]int)
 
-	allNodes.Lock()
+	// add own value to map if it exists
+	kvstore.RLock()
+	_, ok := kvstore.store[args.Key]
+	if ok {
+		addToValuesMap(valuesMap, kvstore.store[args.Key])
+	}
+	kvstore.RUnlock()
 
+	allNodes.Lock()
 	outLog.Println("Attempting to read back-up nodes...")
 	for _, node := range allNodes.nodes {
-		outLog.Printf("Writing to node %s...\n", node.ID)
+		outLog.Printf("Reading from node %s...\n", node.ID)
 
 		nodeArgs := args
 		nodeReply := ReadReply{}
 
 		err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
 		if err != nil {
-			outLog.Println("Could node reach node ", node.Address.String())
+			outLog.Println("Could not reach node ", node.ID)
 		}
 
 		// Record successes
-		if nodeReply.Error != nil {
-			outLog.Printf("Failed to read from node %s... %v\n", node.ID, nodeReply.Error)
+		if !nodeReply.Success {
+			outLog.Printf("Failed to read from node %s... \n", node.ID)
 		} else {
 			outLog.Printf("Successfully read from node %s...\n", node.ID)
 			addToValuesMap(valuesMap, nodeReply.Value)
@@ -679,18 +687,36 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	defer allNodes.Unlock()
 
 	// Find value with most votes
-	// TODO account for ties
-	var result string
+	// set in local kvstore
+	// TODO send out decision to all nodes or only nodes that don't have this value
+	var results []string
 	largestCount := 0
 	for val, count := range valuesMap {
 		if count > largestCount {
 			largestCount = count
-			result = val
+			results = nil
+			results = append(results, val)
+		} else if count == largestCount {
+			results = append(results, val)
 		}
 	}
-
-	reply.Value = result
-	reply.Error = nil
+	outLog.Printf("LENGTH: %d\n", len(results))
+	if len(results) == 0 {
+		reply.Success = false
+		reply.Value = ""
+	} else {
+		var result string
+		if len(results) == 1 {
+			result = results[0]
+		} else {
+			result = results[rand.Intn(len(results)-1)]
+		}
+		kvstore.Lock()
+		kvstore.store[args.Key] = result
+		kvstore.Unlock()
+		reply.Value = result
+		reply.Success = true
+	}
 
 	return nil
 }
@@ -705,15 +731,16 @@ func addToValuesMap(valuesMap map[string]int, val string) {
 }
 
 func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
+	outLog.Println("Node received Read operation")
 	kvstore.RLock()
 	val, ok := kvstore.store[args.Key]
 
 	kvstore.RUnlock()
 	if !ok {
-		reply.Error = errors.New("Key does not exist at this node")
+		reply.Success = false
 		reply.Value = ""
 	} else {
-		reply.Error = nil
+		reply.Success = true
 		reply.Value = val
 	}
 	return nil
@@ -762,6 +789,11 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 		value := args.Value
 		kvstore.store[key] = value
 		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
+		b, err := json.MarshalIndent(kvstore.store, "", "  ")
+		if err != nil {
+			fmt.Println("error:", err)
+		}
+		fmt.Print(string(b))
 
 		*reply = OpReply{Success: true}
 	} else {
@@ -782,6 +814,11 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 
 	kvstore.store[key] = value
 	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
+	b, err := json.MarshalIndent(kvstore.store, "", "  ")
+	if err != nil {
+		fmt.Println("error:", err)
+	}
+	fmt.Print(string(b))
 
 	*reply = OpReply{Success: true}
 	*reply = OpReply{Success: true}
@@ -951,7 +988,7 @@ func (n KVNode) RegisterNode(args *NodeInfo, _unused *int) error {
 
 // send heartbeats to passed node
 func sendHeartBeats(addr string) error {
-	args := &NodeInfo{Address: LocalAddr}
+	args := &NodeInfo{Address: LocalAddr, ID: ID}
 	var reply int
 	for {
 		if _, ok := allNodes.nodes[addr]; !ok {
@@ -979,7 +1016,7 @@ func (n KVNode) ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
 	}
 	allNodes.nodes[addr.String()].RecentHeartbeat = time.Now().UnixNano()
 
-	//outLog.Println("Heartbeats received by ", addr.String())
+	outLog.Println("Heartbeats received from Node ", args.ID)
 	return nil
 }
 

@@ -91,8 +91,8 @@ type ReadRequest struct {
 }
 
 type ReadReply struct {
-	Value string
-	Error error
+	Value   string
+	Success bool
 }
 
 type WriteRequest struct {
@@ -136,14 +136,13 @@ func (c CNode) Read(key string) (string, error) {
 	outLog.Printf("Sending read to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorRead", args, &reply)
 	if err != nil {
-		outLog.Println("Could not complete read: ", err)
+		outLog.Println("Could not connect to coordinator: ", err)
 		return "", err
 	}
-	if reply.Error != nil {
-		outLog.Println("Could not complete read: ", reply.Error)
-		return "", reply.Error
+	if !reply.Success {
+		return "", errors.New("Error retrieving key")
 	}
-	outLog.Printf("Successfully completed read")
+
 	return reply.Value, nil
 }
 
@@ -182,9 +181,9 @@ func (c CNode) Delete(key string) error {
 	outLog.Printf("Sending delete to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorDelete", args, &reply)
 	if err != nil {
-		outLog.Println("Could not complete delete: ", err)
 		return err
 	}
+<<<<<<< HEAD
 
 	// Check if delete was ssuccessful
 	if reply.Success {
@@ -194,6 +193,8 @@ func (c CNode) Delete(key string) error {
 		return MajorityOpError("Failed to delete to majority of nodes")
 	}
 	
+=======
+>>>>>>> finish read implementation
 	return nil
 }
 
