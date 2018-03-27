@@ -163,6 +163,7 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 
 	// Set node information and add to map
 	allNodes.nodes[id] = &Node{
+		ID: 		   id,
 		IsCoordinator: false,
 		Address:       nodeInfo.Address,
 	}
@@ -185,10 +186,6 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 	return nil
 }
 
-// Elect a new coordinator node - elect a new coordinator based on the network majority vote
-//func (s *KVServer) ElectCoordinator() error {
-//	return nil
-//}
 
 // GetAllNodes currently in the network
 // *Useful if a heartbeat connection between nodes dies, but the network is still online
@@ -256,23 +253,6 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	return nil
 }
 
-// TODO: Called when server fails to receive heartbeats from coordinator
-func CoordinatorConnectionFailure(){
-	if len(allFailures.nodes) == 0 {
-		voteInPlace = true
-		outLog.Println("First report failures of coordinator.")
-
-		allFailures.nodes[config.ServerAddress] = true
-		go DetectCoordinatorFailure(time.Now().UnixNano())
-	} else {
-		if _, ok := allFailures.nodes[config.ServerAddress] ; !ok {
-			allFailures.nodes[config.ServerAddress] = true
-
-			// TODO: vote network node with the lowest id to be new coordinator
-		}
-	}
-}
-
 // Listen for quorum number of failure reports
 func DetectCoordinatorFailure(timestamp int64){
 
@@ -291,15 +271,23 @@ func DetectCoordinatorFailure(timestamp int64){
 	}
 	if didFail {
 		// start voting session for new coordinator
-		ElectCoordinator()
+		newCoordinatorAddr := ElectCoordinator()
+		var newCoordinator Node
 
-		// Remove node from list of nodes
-		allNodes.Lock()
-		delete(allNodes.nodes, currentCoordinator.Address.String())
-		allNodes.Unlock()
+		for _, node := range allNodes.nodes{
+			if node.Address.String() == newCoordinatorAddr{
+				newCoordinator = *node
+			}
+		}
 		outLog.Println("Quorum reports of coordinator reached.")
 
-		// TODO: broadcast new coordinator
+		// Remove previous coordinator from all from list of nodes
+		allNodes.Lock()
+		delete(allNodes.nodes, currentCoordinator.ID)
+		outLog.Println(currentCoordinator.ID, " removed.")
+		allNodes.Unlock()
+
+		BroadcastCoordinator(newCoordinator)
 
 	} else {
 		// timeout, reports are invalid
@@ -348,8 +336,27 @@ func ElectCoordinator() string {
 	electedCoordinator = mostPopular[0]
 	outLog.Println("New coordinator elected: ", electedCoordinator)
 	return electedCoordinator
+}
 
+func BroadcastCoordinator(newCoordinator Node){
+	outLog.Println("Broadcasting new coordinator...")
+	allNodes.RLock()
+	defer allNodes.RUnlock()
+	for _, node := range allNodes.nodes{
+		// Connect to node
+		conn, err := rpc.Dial("tcp", node.Address.String())
+		if err != nil {
+			outLog.Println("Error sending new coordinator to ", node.Address.String())
+		}
 
+		args := NodeInfo{
+			Address: newCoordinator.Address,
+			ID: newCoordinator.ID,
+		}
+		var reply int
+
+		conn.Call("KVNode.NewCoordinator", &args, &reply)
+	}
 
 }
 

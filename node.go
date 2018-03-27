@@ -259,7 +259,6 @@ func ReportNodeFailure(node *Node){
 
 func ReportCoordinatorFailure(node *Node){
 	// If connection with server has failed, reconnect
-
 	vote := voteNewCoordinator()
 
 	info := &CoordinatorFailureInfo{
@@ -277,7 +276,24 @@ func ReportCoordinatorFailure(node *Node){
 	}
 }
 
+// Save the new coordinator
+func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
+	addr := args.Address
+	outLog.Println("Received new coordinator... ", addr )
 
+	if addr.String() == LocalAddr.String() {
+		outLog.Println("I am the new coordinator!")
+		isCoordinator = true
+	} else {
+		allNodes.nodes[addr.String()].IsCoordinator = true
+		Coordinator = allNodes.nodes[addr.String()].NodeConn
+		outLog.Println(addr , " is the new coordinator.")
+	}
+
+	// election complete, new coordinator elected
+	coordinatorFailed = false
+	return nil
+}
 
 ////////////////////////////////////////////////////////////////////////////////
 // NODE FUNCTION
@@ -294,7 +310,7 @@ func MonitorHeartBeats(addr string){
 
 			if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
 				allNodes.RLock()
-				if (isCoordinator) {
+				if isCoordinator {
 					SaveNodeFailure(allNodes.nodes[addr])
 				} else if allNodes.nodes[addr].IsCoordinator && coordinatorFailed == false {
 					ReportCoordinatorFailure(allNodes.nodes[addr])
@@ -304,7 +320,7 @@ func MonitorHeartBeats(addr string){
 				allNodes.RUnlock()
 			}
 		} else {
-			outLog.Println("Node not found.", addr)
+			outLog.Println("Node not found in network. Stop monitoring heartbeats.", addr)
 			return
 		}
 
@@ -678,7 +694,7 @@ func sendHeartBeats(addr string) error {
 	var reply int
 	for{
 		if _,ok := allNodes.nodes[addr]; !ok {
-			outLog.Println("Connection invalid.")
+			outLog.Println("Node not found in network. Stop sending heartbeats", addr)
 			return nil
 		}
 		err := allNodes.nodes[addr].NodeConn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
