@@ -280,9 +280,8 @@ func DetectCoordinatorFailure(timestamp int64){
 		allFailures.RUnlock()
 	}
 	if didFail {
-		// start voting session for new coordinator
-		newCoordinatorAddr := ElectCoordinator()
-		var newCoordinator Node
+		// tally up votes
+		ElectCoordinator()
 
 		for _, node := range allNodes.nodes{
 			if node.Address.String() == newCoordinatorAddr{

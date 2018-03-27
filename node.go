@@ -19,7 +19,7 @@ import (
 	"sync"
 	"time"
 	"strconv"
-	
+
 	"./dkvlib"
 )
 
@@ -632,6 +632,7 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	kvstore.store[key] = value
 	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 
+	*reply = OpReply{Success: true}
 	*reply = OpReply{Success: true}
 
 	return nil
