@@ -52,6 +52,12 @@ func (e RegistrationError) Error() string {
 	return fmt.Sprintf("Server: Failure to register node [%s]", string(e))
 }
 
+type InvalidFailureError string
+
+func (e InvalidFailureError) Error() string {
+	return fmt.Sprintf("Server: Failure Alert invalid. Ignoring. [%s]", string(e))
+}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
@@ -225,6 +231,10 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	reporter := info.Reporter
 	voted := info.NewCoordinator
 
+	if currentCoordinator.Address.String() != failed.String(){
+		outLog.Println("Reported failure not coordinator, ignore.")
+		return InvalidFailureError(failed.String())
+	}
 
 	if len(allFailures.nodes) == 0 {
 		voteInPlace = true
@@ -286,6 +296,8 @@ func DetectCoordinatorFailure(timestamp int64){
 		delete(allNodes.nodes, currentCoordinator.ID)
 		outLog.Println(currentCoordinator.ID, " removed.")
 		allNodes.Unlock()
+
+		currentCoordinator = newCoordinator
 
 		BroadcastCoordinator(newCoordinator)
 
