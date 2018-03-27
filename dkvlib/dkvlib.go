@@ -44,7 +44,7 @@ func (e CoordinatorWriteError) Error() string {
 type MajorityOpError string
 
 func (e MajorityOpError) Error() string {
-	return fmt.Sprintf("DKV: Could not complte operation on a majority of network nodes. Operation failed [%s]", string(e))
+	return fmt.Sprintf("DKV: Could not complete operation on a majority of network nodes. Operation failed [%s]", string(e))
 }
 
 type NonexistentKeyError string
@@ -91,17 +91,12 @@ type WriteRequest struct {
 	Value string
 }
 
-<<<<<<< HEAD
 type DeleteRequest struct {
 	Key   string
 }
 
 type OpReply struct {
 	Success 	bool
-=======
-type WriteReply struct {
-	Success bool
->>>>>>> dev
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -143,13 +138,8 @@ func (c CNode) Write(key, value string) error {
 	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 
 	args := &WriteRequest{Key: key, Value: value}
-<<<<<<< HEAD
 	reply := OpReply{}
 	
-=======
-	reply := WriteReply{}
-
->>>>>>> dev
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
