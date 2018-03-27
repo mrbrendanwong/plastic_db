@@ -163,6 +163,15 @@ func ConnectServer(serverAddr string) {
 	// Connect to existing nodes
 	GetNodes()
 
+	// Close server connection
+	outLog.Printf("Closing connection to server...")
+	err = Server.Close()
+	if err != nil {
+		outLog.Println("Server connection already closing:", err)
+	} else {
+		outLog.Printf("Server connection successfully closed! Network node ready!")
+	}
+
 	// Listen for other incoming nodes
 	kvNode := new(KVNode)
 	node := rpc.NewServer()
@@ -221,9 +230,6 @@ func GetNodes() (err error) {
 ////////////////////////////////////////////////////////////////////////////////
 // NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
-func ConnectToCoordinator() {
-	return
-}
 
 // Check for heartbeat timeouts from other nodes
 func MonitorHeartBeats(addr string) {
