@@ -689,7 +689,7 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 		}
 	}
 
-	defer allNodes.Unlock()
+	allNodes.Unlock()
 
 	// Find value with most votes
 	// set in local kvstore
