@@ -281,8 +281,9 @@ func DetectCoordinatorFailure(timestamp int64){
 	}
 	if didFail {
 		// tally up votes
-		ElectCoordinator()
+		newCoordinatorAddr := ElectCoordinator()
 
+		var newCoordinator Node
 		for _, node := range allNodes.nodes{
 			if node.Address.String() == newCoordinatorAddr{
 				newCoordinator = *node
