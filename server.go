@@ -51,6 +51,12 @@ func (e RegistrationError) Error() string {
 	return fmt.Sprintf("Server: Failure to register node [%s]", string(e))
 }
 
+type InvalidFailureError string
+
+func (e InvalidFailureError) Error() string {
+	return fmt.Sprintf("Server: Failure Alert invalid. Ignoring. [%s]", string(e))
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ////////////////////////////////////////////////////////////////////////////////
@@ -64,7 +70,7 @@ var (
 
 // Variables related to nodes
 var (
-	allNodes           AllNodes = AllNodes{Nodes: make(map[string]*Node)}
+	allNodes           AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	currentCoordinator Node
 	nextID             int = 0
 )
@@ -104,15 +110,15 @@ type NodeSettings struct {
 // Node - a node of the network
 type Node SmallNode
 type SmallNode struct {
-	ID            string 
-	IsCoordinator bool 
-	Address       net.Addr 
+	ID            string
+	IsCoordinator bool
+	Address       net.Addr
 }
 
 // All Nodes - a map containing all nodes, including the coordinator
 type AllNodes struct {
 	sync.RWMutex
-	Nodes map[string]*Node
+	nodes map[string]*Node
 }
 
 type NodeInfo struct {
@@ -159,45 +165,41 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 	nextID++
 
 	// Define errors
-	if _, exists := allNodes.Nodes[id]; exists {
+	if _, exists := allNodes.nodes[id]; exists {
 		return IDAlreadyRegisteredError(id)
 	}
 
 	// Set node information and add to map
-	allNodes.Nodes[id] = &Node{
+	allNodes.nodes[id] = &Node{
+		ID:            id,
 		IsCoordinator: false,
 		Address:       nodeInfo.Address,
 	}
 	// Check if this is the first node; if so set iscoordinator
 	// and set current coordinator
-	if len(allNodes.Nodes) == 1 {
-		allNodes.Nodes[id].IsCoordinator = true
+	if len(allNodes.nodes) == 1 {
+		allNodes.nodes[id].IsCoordinator = true
 		// Set current coordinator
-		currentCoordinator = *allNodes.Nodes[id]
+		currentCoordinator = *allNodes.nodes[id]
 	}
 
 	// Reply
 	*settings = RegistrationPackage{Settings: config.NodeSettings,
 		ID:            id,
-		IsCoordinator: allNodes.Nodes[id].IsCoordinator}
+		IsCoordinator: allNodes.nodes[id].IsCoordinator}
 
 	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
 	outLog.Printf("Gave node ID %s\n", id)
 
-    outLog.Printf("allNodes:%v\n", allNodes.Nodes)
+	outLog.Printf("allNodes:%v\n", allNodes.nodes)
 	return nil
 }
-
-// Elect a new coordinator node - elect a new coordinator based on the network majority vote
-//func (s *KVServer) ElectCoordinator() error {
-//	return nil
-//}
 
 // GetAllNodes currently in the network
 // *Useful if a heartbeat connection between nodes dies, but the network is still online
 func (s *KVServer) GetAllNodes(msg int, response *map[string]*Node) error {
 	allNodes.RLock()
-	*response = allNodes.Nodes
+	*response = allNodes.nodes
 	allNodes.RUnlock()
 	return nil
 }
@@ -219,7 +221,7 @@ func (s KVServer) NodeFailureAlert(info *NodeInfo, _unused *int) error {
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
-	delete(allNodes.Nodes, failedNode.String())
+	delete(allNodes.nodes, failedNode.String())
 	outLog.Println("Node removed from system: ", failedNode.String())
 
 	return nil
@@ -230,6 +232,11 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	failed := info.Failed
 	reporter := info.Reporter
 	voted := info.NewCoordinator
+
+	if currentCoordinator.Address.String() != failed.String() {
+		outLog.Println("Reported failure not coordinator, ignore.")
+		return InvalidFailureError(failed.String())
+	}
 
 	if len(allFailures.nodes) == 0 {
 		voteInPlace = true
@@ -297,13 +304,27 @@ func DetectCoordinatorFailure(timestamp int64) {
 		// To stop the compilation errors
 		fmt.Printf("Elected coordinator:%v\n", electedCoordinator)
 
-		// Remove node from list of nodes
-		allNodes.Lock()
-		delete(allNodes.Nodes, currentCoordinator.Address.String())
-		allNodes.Unlock()
+		// stub so it can run
+		newCoordinatorAddr := currentCoordinator.Address.String()
+		// end of stub
+
+		var newCoordinator Node
+		for _, node := range allNodes.nodes {
+			if node.Address.String() == newCoordinatorAddr {
+				newCoordinator = *node
+			}
+		}
 		outLog.Println("Quorum reports of coordinator reached.")
 
-		// TODO: broadcast new coordinator
+		// Remove previous coordinator from all from list of nodes
+		allNodes.Lock()
+		delete(allNodes.nodes, currentCoordinator.ID)
+		outLog.Println(currentCoordinator.ID, " removed.")
+		allNodes.Unlock()
+
+		currentCoordinator = newCoordinator
+
+		BroadcastCoordinator(newCoordinator)
 
 	} else {
 		// timeout, reports are invalid
@@ -322,13 +343,13 @@ func DetectCoordinatorFailure(timestamp int64) {
 // Receive map of online nodes from coordinator
 func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error) {
 	allNodes.Lock()
-	allNodes.Nodes = args
+	allNodes.nodes = args
 	allNodes.Unlock()
 	// if number of online nodes is 0, return empty as 1
-    fmt.Printf("Server nodes:%v\n", args)
-    for k,v := range args {
-        fmt.Printf("k:%v, v:%v\n", k, v)
-    }
+	fmt.Printf("Size of server nodes:%d, Server nodes:%v\n", len(args), args)
+	for k, v := range args {
+		fmt.Printf("k:%v, v:%v\n", k, v)
+	}
 	return nil
 }
 
@@ -370,6 +391,28 @@ func ElectCoordinator() string {
 	return electedCoordinator
 }
 
+func BroadcastCoordinator(newCoordinator Node) {
+	outLog.Println("Broadcasting new coordinator...")
+	allNodes.RLock()
+	defer allNodes.RUnlock()
+	for _, node := range allNodes.nodes {
+		// Connect to node
+		conn, err := rpc.Dial("tcp", node.Address.String())
+		if err != nil {
+			outLog.Println("Error sending new coordinator to ", node.Address.String())
+		}
+
+		args := NodeInfo{
+			Address: newCoordinator.Address,
+			ID:      newCoordinator.ID,
+		}
+		var reply int
+
+		conn.Call("KVNode.NewCoordinator", &args, &reply)
+	}
+
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // SERVER <-> CLIENT FUNCTIONS
 ////////////////////////////////////////////////////////////////////////////////
@@ -396,7 +439,7 @@ func readConfigOrDie(path string) {
 }
 
 func getQuorumNum() int {
-	return len(allNodes.Nodes)/2 + 1
+	return len(allNodes.nodes)/2 + 1
 }
 
 func castVote(addr string) {
