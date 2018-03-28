@@ -261,23 +261,6 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	return nil
 }
 
-// TODO: Called when server fails to receive heartbeats from coordinator
-func CoordinatorConnectionFailure() {
-	if len(allFailures.nodes) == 0 {
-		voteInPlace = true
-		outLog.Println("First report failures of coordinator.")
-
-		allFailures.nodes[config.ServerAddress] = true
-		go DetectCoordinatorFailure(time.Now().UnixNano())
-	} else {
-		if _, ok := allFailures.nodes[config.ServerAddress]; !ok {
-			allFailures.nodes[config.ServerAddress] = true
-
-			// TODO: vote network node with the lowest id to be new coordinator
-		}
-	}
-}
-
 // Listen for quorum number of failure reports
 func DetectCoordinatorFailure(timestamp int64) {
 
