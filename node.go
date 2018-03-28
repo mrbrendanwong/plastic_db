@@ -268,16 +268,13 @@ func GetNodes() (err error) {
 	var nodeSet map[string]*Node
 
 	err = Server.Call("KVServer.GetAllNodes", 0, &nodeSet)
-	fmt.Printf("Nodeset:%v\n", nodeSet)
 	if err != nil {
 		outLog.Println("Error getting existing nodes from server")
 	} else {
 		outLog.Println("Connecting to the other nodes...")
 		for id, node := range nodeSet {
-			fmt.Printf("original id:%v, node:%v\n", id, node)
 			if node.Address.String() != LocalAddr.String() {
 				node.ID = id
-				fmt.Printf("new node:%v\n", node)
 				ConnectNode(node)
 			}
 		}
@@ -294,7 +291,7 @@ func AddSelfToMap() {
 		Address:       LocalAddr,
 	}
 	allNodes.Lock()
-	allNodes.nodes[ID] = selfNode
+	allNodes.nodes[LocalAddr.String()] = selfNode
 	allNodes.Unlock()
 }
 
@@ -436,7 +433,6 @@ func UpdateOnlineNodes() {
 		allNodes.RLock()
 		nodes := allNodes.nodes
 		allNodes.RUnlock()
-		fmt.Printf("Number of nodes:%d, nodes:%v\n", len(nodes), nodes)
 
 		nodeMap := make(map[string]*SmallNode)
 		for k, v := range nodes {
@@ -445,9 +441,7 @@ func UpdateOnlineNodes() {
 				IsCoordinator: v.IsCoordinator,
 				Address:       v.Address,
 			}
-			fmt.Printf("Loop: new map:%v\n", nodeMap[k])
 		}
-		fmt.Printf("Number of nodes in new map:%d, nodes:%v\n", len(nodeMap), nodeMap)
 
 		err := Server.Call("KVServer.GetOnlineNodes", nodeMap, &unused)
 		if err != nil {

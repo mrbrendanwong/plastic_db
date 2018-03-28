@@ -345,11 +345,6 @@ func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error
 	allNodes.Lock()
 	allNodes.nodes = args
 	allNodes.Unlock()
-	// if number of online nodes is 0, return empty as 1
-	fmt.Printf("Size of server nodes:%d, Server nodes:%v\n", len(args), args)
-	for k, v := range args {
-		fmt.Printf("k:%v, v:%v\n", k, v)
-	}
 	return nil
 }
 
