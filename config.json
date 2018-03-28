@@ -1,5 +1,5 @@
 {
-	"server-ip-port": "198.162.33.23:12345",
+	"server-ip-port": "127.0.0.1:12345",
 	"node-settings": {
 		"heartbeat": 5000,
 		"voting-wait": 5000,
