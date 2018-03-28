@@ -160,8 +160,13 @@ type ReadRequest struct {
 }
 
 type ReadReply struct {
+<<<<<<< HEAD
 	Value string
 	Error error
+=======
+	Value   string
+	Success bool
+>>>>>>> integration fixes
 }
 
 type WriteRequest struct {

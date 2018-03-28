@@ -135,17 +135,17 @@ func main() {
 	} else {
 		outLog.Printf("Value returned: %s", val)
 	}
-	
-	err = coordinator.Delete("a")
-	if err != nil {
-		outLog.Println(err)
-	} else {
-		outLog.Println("Delete succeeded")
-	}
 
-	err = coordinator.Delete("a")
-	if err != nil {
-		outLog.Println("Delete failed")
-	}
+	// err = coordinator.Delete("a")
+	// if err != nil {
+	// 	outLog.Println(err)
+	// } else {
+	// 	outLog.Println("Delete succeeded")
+	// }
+
+	// err = coordinator.Delete("a")
+	// if err != nil {
+	// 	outLog.Println("Delete failed")
+	// }
 
 }

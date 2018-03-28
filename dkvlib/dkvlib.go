@@ -101,11 +101,11 @@ type WriteRequest struct {
 }
 
 type DeleteRequest struct {
-	Key   string
+	Key string
 }
 
 type OpReply struct {
-	Success 	bool
+	Success bool
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -152,7 +152,7 @@ func (c CNode) Write(key, value string) error {
 
 	args := &WriteRequest{Key: key, Value: value}
 	reply := OpReply{}
-	
+
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
@@ -183,7 +183,6 @@ func (c CNode) Delete(key string) error {
 	if err != nil {
 		return err
 	}
-<<<<<<< HEAD
 
 	// Check if delete was ssuccessful
 	if reply.Success {
@@ -192,9 +191,7 @@ func (c CNode) Delete(key string) error {
 		outLog.Println("Failed to delete from coordinator...")
 		return MajorityOpError("Failed to delete to majority of nodes")
 	}
-	
-=======
->>>>>>> finish read implementation
+
 	return nil
 }
 
