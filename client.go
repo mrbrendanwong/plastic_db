@@ -122,6 +122,7 @@ func main() {
 	go getHeartbeat(coordinator, 2*time.Second)
 
 	// Call functions on API
+	outLog.Println("----------------- TEST: Write value -----------------")
 	err = coordinator.Write("a", "7")
 	if err != nil {
 		outLog.Println(err)
@@ -129,6 +130,7 @@ func main() {
 		outLog.Println("Write Succeeded")
 	}
 
+	outLog.Println("----------------- TEST: Read existing key -----------------")
 	val, error := coordinator.Read("a")
 	if error != nil {
 		outLog.Println(error)
@@ -136,6 +138,7 @@ func main() {
 		outLog.Printf("Value returned: %s", val)
 	}
 
+	outLog.Println("----------------- TEST: Delete existing key -----------------")
 	err = coordinator.Delete("a")
 	if err != nil {
 		outLog.Println(err)
@@ -143,6 +146,14 @@ func main() {
 		outLog.Println("Delete succeeded")
 	}
 
+	outLog.Println("----------------- TEST: Read non-existent key -----------------")
+	val, error = coordinator.Read("a")
+	if error != nil {
+		outLog.Println(error)
+	} else {
+		outLog.Printf("Value returned: %s", val)
+	}
+	outLog.Println("----------------- TEST: Delete non-existent key -----------------")
 	err = coordinator.Delete("a")
 	if err != nil {
 		outLog.Println("Delete failed")

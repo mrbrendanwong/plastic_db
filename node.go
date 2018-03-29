@@ -465,7 +465,7 @@ func UpdateOnlineNodes() {
 		if err != nil {
 			outLog.Printf("Could not send online nodes to server: %s\n", err)
 		} else {
-			outLog.Println("Server's map of online nodes updated...")
+			//outLog.Println("Server's map of online nodes updated...")
 		}
 		time.Sleep(5 * time.Second)
 	}
@@ -665,23 +665,26 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	allNodes.Lock()
 	outLog.Println("Attempting to read back-up nodes...")
 	for _, node := range allNodes.nodes {
-		outLog.Printf("Reading from node %s...\n", node.ID)
+		if !node.IsCoordinator {
+			outLog.Printf("Reading from node %s...\n", node.ID)
 
-		nodeArgs := args
-		nodeReply := ReadReply{}
+			nodeArgs := args
+			nodeReply := ReadReply{}
 
-		err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
-		if err != nil {
-			outLog.Println("Could not reach node ", node.ID)
+			err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
+			if err != nil {
+				outLog.Println("Could not reach node ", node.ID)
+			}
+
+			// Record successes
+			if !nodeReply.Success {
+				outLog.Printf("Failed to read from node %s... \n", node.ID)
+			} else {
+				outLog.Printf("Successfully read from node %s...\n", node.ID)
+				addToValuesMap(valuesMap, nodeReply.Value)
+			}
 		}
 
-		// Record successes
-		if !nodeReply.Success {
-			outLog.Printf("Failed to read from node %s... \n", node.ID)
-		} else {
-			outLog.Printf("Successfully read from node %s...\n", node.ID)
-			addToValuesMap(valuesMap, nodeReply.Value)
-		}
 	}
 
 	allNodes.Unlock()
@@ -755,22 +758,24 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	successes := 0
 	outLog.Println("Attempting to write to back-up nodes...")
 	for _, node := range allNodes.nodes {
-		outLog.Printf("Writing to node %s...\n", node.ID)
+		if !node.IsCoordinator {
+			outLog.Printf("Writing to node %s...\n", node.ID)
 
-		nodeArgs := args
-		nodeReply := OpReply{}
+			nodeArgs := args
+			nodeReply := OpReply{}
 
-		err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
-		if err != nil {
-			outLog.Println("Could not write to node ", err)
-		}
+			err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
+			if err != nil {
+				outLog.Println("Could not write to node ", err)
+			}
 
-		// Record successes
-		if nodeReply.Success {
-			successes++
-			outLog.Printf("Successfully wrote to node %s!\n", node.ID)
-		} else {
-			outLog.Printf("Failed to write to node %s...\n", node.ID)
+			// Record successes
+			if nodeReply.Success {
+				successes++
+				outLog.Printf("Successfully wrote to node %s!\n", node.ID)
+			} else {
+				outLog.Printf("Failed to write to node %s...\n", node.ID)
+			}
 		}
 	}
 
@@ -835,23 +840,26 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 	successes := 0
 	outLog.Println("Attempting to delete from back-up nodes...")
 	for _, node := range allNodes.nodes {
-		outLog.Printf("Deleting from node %s...\n", node.ID)
+		if !node.IsCoordinator {
+			outLog.Printf("Deleting from node %s...\n", node.ID)
 
-		nodeArgs := args
-		nodeReply := OpReply{}
+			nodeArgs := args
+			nodeReply := OpReply{}
 
-		err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
-		if err != nil {
-			outLog.Println("Could not delete from node ", err)
+			err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
+			if err != nil {
+				outLog.Println("Could not delete from node ", err)
+			}
+
+			// Record successes
+			if nodeReply.Success {
+				successes++
+				outLog.Printf("Successfully deleted from node %s!\n", node.ID)
+			} else {
+				outLog.Printf("Failed to delete from node %s...\n", node.ID)
+			}
 		}
 
-		// Record successes
-		if nodeReply.Success {
-			successes++
-			outLog.Printf("Successfully deleted from node %s!\n", node.ID)
-		} else {
-			outLog.Printf("Failed to delete from node %s...\n", node.ID)
-		}
 	}
 
 	// Check if majority of deletes suceeded
