@@ -197,6 +197,7 @@ func ConnectServer(serverAddr string) {
 		return
 	}
 	outLog.Printf("Successfully connected to server at %s!", serverAddr)
+	outLog.Printf("My local address is %s", LocalAddr.String())
 
 	// Register node to server
 	err = RegisterNode()
@@ -219,7 +220,7 @@ func ConnectServer(serverAddr string) {
 	if err != nil {
 		outLog.Println("Server connection already closing:", err)
 	} else {
-		outLog.Printf("Server connection successfully closed! Network node ready!")
+		outLog.Printf("Server connection successfully closed! Node is ready!")
 	}
 
 	// Coordinator reports for duty to server
@@ -316,7 +317,7 @@ func ReportCoordinatorFailure(node *Node) {
 		return
 	}
 
-	outLog.Println("Reconnected with server.")
+	outLog.Println("Reconnected with server to vote for failure of coordinator.")
 
 	vote := voteNewCoordinator()
 
@@ -348,15 +349,22 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 	addr := args.Address
 	outLog.Println("Received new coordinator... ", addr)
 
+	allNodes.Lock()
 	delete(allNodes.nodes, Coordinator.Address.String())
+
 	if addr.String() == LocalAddr.String() {
 		outLog.Println("I am the new coordinator!")
 		isCoordinator = true
+		ReportForCoordinatorDuty(ServerAddr)
 	} else {
+		if _, ok := allNodes.nodes[addr.String()]; ok {
+			fmt.Printf("Node %s exists\n", addr.String())
+		}
 		allNodes.nodes[addr.String()].IsCoordinator = true
 		Coordinator = allNodes.nodes[addr.String()]
 		outLog.Println(addr, " is the new coordinator.")
 	}
+	allNodes.Unlock()
 
 	// election complete, new coordinator elected
 	coordinatorFailed = false
@@ -876,7 +884,7 @@ func sendHeartBeats(addr string) error {
 		}
 		err := allNodes.nodes[addr].NodeConn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
 		if err != nil {
-			outLog.Println("Error sending heartbeats")
+			outLog.Println("Error sending heartbeats to", addr)
 
 		}
 		time.Sleep(time.Duration(Settings.HeartBeat) * time.Millisecond)

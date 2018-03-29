@@ -217,6 +217,7 @@ func (s KVServer) NodeFailureAlert(info *NodeInfo, _unused *int) error {
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
+	fmt.Printf("Failed node string:%s\n", failedNode.String())
 	delete(allNodes.nodes, failedNode.String())
 	outLog.Println("Node removed from system: ", failedNode.String())
 
@@ -235,6 +236,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	}
 
 	if len(allFailures.nodes) == 0 {
+		allFailures.nodes = make(map[string]bool)
 		voteInPlace = true
 		outLog.Println("First reported failure of coordinator ", failed, " received from ", reporter)
 
@@ -263,7 +265,6 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 
 // Listen for quorum number of failure reports
 func DetectCoordinatorFailure(timestamp int64) {
-
 	var didFail bool = false
 	quorum := getQuorumNum()
 
@@ -277,15 +278,11 @@ func DetectCoordinatorFailure(timestamp int64) {
 		}
 		allFailures.RUnlock()
 	}
+
 	if didFail {
 		// tally up votes
-		electedCoordinator := ElectCoordinator()
-		// To stop the compilation errors
-		fmt.Printf("Elected coordinator:%v\n", electedCoordinator)
-
-		// stub so it can run
-		newCoordinatorAddr := currentCoordinator.Address.String()
-		// end of stub
+		newCoordinatorAddr := ElectCoordinator()
+		fmt.Printf("ElectedCoordinator is:%s\n", newCoordinatorAddr)
 
 		var newCoordinator Node
 		for _, node := range allNodes.nodes {
@@ -295,15 +292,14 @@ func DetectCoordinatorFailure(timestamp int64) {
 		}
 		outLog.Println("Quorum reports of coordinator reached.")
 
-		// Remove previous coordinator from all from list of nodes
+		// Remove previous coordinator from list of nodes
 		allNodes.Lock()
-		delete(allNodes.nodes, currentCoordinator.ID)
-		outLog.Println(currentCoordinator.ID, " removed.")
+		delete(allNodes.nodes, currentCoordinator.Address.String())
+		outLog.Println("Node ", currentCoordinator.ID, " with address ", currentCoordinator.Address.String(), " removed.")
 		allNodes.Unlock()
 
-		currentCoordinator = newCoordinator
-
 		BroadcastCoordinator(newCoordinator)
+		currentCoordinator = newCoordinator
 
 	} else {
 		// timeout, reports are invalid
@@ -312,6 +308,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 	// clear map of failures
 	allFailures.nodes = make(map[string]bool)
+	voteInPlace = false
 	return
 }
 
@@ -362,6 +359,10 @@ func ElectCoordinator() string {
 
 	electedCoordinator = mostPopular[0]
 	outLog.Println("New coordinator elected: ", electedCoordinator)
+
+	// Flush votes and failures by making new map
+	allVotes.votes = make(map[string]int)
+
 	return electedCoordinator
 }
 
@@ -369,7 +370,12 @@ func BroadcastCoordinator(newCoordinator Node) {
 	outLog.Println("Broadcasting new coordinator...")
 	allNodes.RLock()
 	defer allNodes.RUnlock()
+
 	for _, node := range allNodes.nodes {
+		if node.Address.String() == currentCoordinator.Address.String() {
+			continue
+		}
+
 		// Connect to node
 		conn, err := rpc.Dial("tcp", node.Address.String())
 		if err != nil {
@@ -413,7 +419,11 @@ func readConfigOrDie(path string) {
 }
 
 func getQuorumNum() int {
-	return len(allNodes.nodes)/2 + 1
+	num := len(allNodes.nodes)/2 + 1
+	if num == 2 {
+		return 1
+	}
+	return num
 }
 
 func castVote(addr string) {
