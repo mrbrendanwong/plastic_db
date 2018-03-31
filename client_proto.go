@@ -141,6 +141,7 @@ func timeoutCmd(cmdList []string) error {
 	timeoutNum, _ := strconv.Atoi(timeoutString)
 
 	// Execute
+	outLog.Printf("Timeout for %d millisecond(s)...", timeoutNum)
 	time.Sleep(time.Duration(timeoutNum) * time.Millisecond)
 
 	return nil

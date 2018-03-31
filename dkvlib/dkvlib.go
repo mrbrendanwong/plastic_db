@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"regexp"
 )
 
 ///////////////////////////////////////////////////////////////////////////
@@ -148,13 +149,22 @@ func (c CNode) Read(key string) (string, error) {
 
 // Write value to key
 func (c CNode) Write(key, value string) error {
+	// Check for valid characters
+	regex, err := regexp.Compile("^[a-zA-Z0-9]+$")
+	if !regex.MatchString(key) {
+		return InvalidKeyCharError(key)
+	}
+	if !regex.MatchString(value) {
+		return InvalidValueCharError(value)
+	}
+
 	outLog.Printf("WRITING KEY: %s with VALUE: %s\n", key, value)
 
 	args := &WriteRequest{Key: key, Value: value}
 	reply := OpReply{}
 
 	outLog.Printf("Sending write to coordinator")
-	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
+	err = c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
 		outLog.Println("Could not connect to coordinator: ", err)
 		return err
