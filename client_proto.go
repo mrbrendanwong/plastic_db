@@ -24,8 +24,8 @@ import (
 )
 
 var (
-	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	errLog *log.Logger = log.New(os.Stderr, "[client] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog *log.Logger = log.New(os.Stderr, "[client] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
 )
 
 var (
@@ -150,8 +150,8 @@ func main() {
 	gob.Register(&net.TCPAddr{})
 
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: go run client.go [server ip:port] [cmd]")
-		fmt.Printf("The following commands may be used:\nRead: R,<key>\nWrite: W,<key>,<value>\nDelete: D,<key>\n")
+		outLog.Println("Usage: go run client.go [server ip:port] [cmd]")
+		outLog.Printf("The following commands may be used:\nRead: R,<key>\nWrite: W,<key>,<value>\nDelete: D,<key>\n")
 		os.Exit(1)
 	}
 
@@ -186,50 +186,51 @@ func main() {
 
 	commands := os.Args[2:]
 
-	fmt.Printf("Executing %d command actions...", len(commands))
+	outLog.Printf("Executing %d command actions...", len(commands))
 
 	for _, cmd := range commands {
 		cmdList := strings.Split(cmd, ",")
 		switch cmdList[0] {
 		case "R":
 			if len(cmdList) != 2 {
-				fmt.Println("Wrong number of command args! Aborting remaining commands")
+				errLog.Println("Wrong number of command args! Aborting remaining commands")
 				break
 			} else {
 				err = readCmd(cmdList[1:])
 			}
 		case "W":
 			if len(cmdList) != 3 {
-				fmt.Println("Wrong number of command args! Aborting remaining commands")
+				errLog.Println("Wrong number of command args! Aborting remaining commands")
 				break
 			} else {
 				err = writeCmd(cmdList[1:])
 			}
 		case "D":
 			if len(cmdList) != 2 {
-				fmt.Println("Wrong number of command args! Aborting remaining commands")
+				errLog.Println("Wrong number of command args! Aborting remaining commands")
 				break
 			} else {
 				err = deleteCmd(cmdList[1:])
 			}
 		case "T":
 			if len(cmdList) != 2 {
-				fmt.Println("Wrong number of command args! Aborting remaining commands")
+				errLog.Println("Wrong number of command args! Aborting remaining commands")
 				break
 			} else {
 				err = timeoutCmd(cmdList[1:])
 			}
 		default:
-			fmt.Printf("%s is not an applicable command action")
+			errLog.Printf("%s is not an applicable command action. Aborting remaining commands")
+			break
 		}
 
 		if err != nil {
-			fmt.Println("Could not execute command: ", err)
+			errLog.Println("Could not execute command: ", err)
 			break
 		}
 	}
 
-	fmt.Println("Commands complete!")
+	outLog.Println("Commands complete!")
 
 
 }
