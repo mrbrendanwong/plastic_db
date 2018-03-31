@@ -86,17 +86,26 @@ type CNode struct {
 // TYPES, STRUCTURES
 ////////////////////////////////////////////////////////////////////////////////
 
+type ReadRequest struct {
+	Key string
+}
+
+type ReadReply struct {
+	Value   string
+	Success bool
+}
+
 type WriteRequest struct {
 	Key   string
 	Value string
 }
 
 type DeleteRequest struct {
-	Key   string
+	Key string
 }
 
 type OpReply struct {
-	Success 	bool
+	Success bool
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -121,16 +130,20 @@ func OpenCoordinatorConn(coordinatorAddr string) (cNodeConn CNodeConn, err error
 // Get value of key
 func (c CNode) Read(key string) (string, error) {
 
-	var reply string
+	args := &ReadRequest{Key: key}
+	reply := ReadReply{}
 
 	outLog.Printf("Sending read to coordinator")
-	err := c.Coordinator.Call("KVNode.CoordinatorRead", &key, &reply)
+	err := c.Coordinator.Call("KVNode.CoordinatorRead", args, &reply)
 	if err != nil {
-		outLog.Println("Could not complete read: ", err)
+		outLog.Println("Could not connect to coordinator: ", err)
 		return "", err
 	}
-	outLog.Printf("Successfully completed read")
-	return reply, nil
+	if !reply.Success {
+		return "", errors.New("Error retrieving key")
+	}
+
+	return reply.Value, nil
 }
 
 // Write value to key
@@ -139,7 +152,7 @@ func (c CNode) Write(key, value string) error {
 
 	args := &WriteRequest{Key: key, Value: value}
 	reply := OpReply{}
-	
+
 	outLog.Printf("Sending write to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorWrite", args, &reply)
 	if err != nil {
@@ -168,7 +181,6 @@ func (c CNode) Delete(key string) error {
 	outLog.Printf("Sending delete to coordinator")
 	err := c.Coordinator.Call("KVNode.CoordinatorDelete", args, &reply)
 	if err != nil {
-		outLog.Println("Could not complete delete: ", err)
 		return err
 	}
 
@@ -179,7 +191,7 @@ func (c CNode) Delete(key string) error {
 		outLog.Println("Failed to delete from coordinator...")
 		return MajorityOpError("Failed to delete to majority of nodes")
 	}
-	
+
 	return nil
 }
 

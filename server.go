@@ -38,7 +38,7 @@ func (e IDAlreadyRegisteredError) Error() string {
 }
 
 // Address already registered in the server
-type AddressAlreadyRegisteredError string
+type AddressAlreadyRegisteredError string 
 
 func (e AddressAlreadyRegisteredError) Error() string {
 	return fmt.Sprintf("Server: Address already registered [%s]", string(e))
@@ -166,12 +166,12 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 
 	// Define errors
 	if _, exists := allNodes.nodes[id]; exists {
-		return IDAlreadyRegisteredError(id)
+		return IDAlreadyRegisteredError(id);
 	}
 
 	// Set node information and add to map
 	allNodes.nodes[id] = &Node{
-		ID:            id,
+		ID: 		   id,
 		IsCoordinator: false,
 		Address:       nodeInfo.Address,
 	}
@@ -233,12 +233,13 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	reporter := info.Reporter
 	voted := info.NewCoordinator
 
-	if currentCoordinator.Address.String() != failed.String() {
+	if currentCoordinator.Address.String() != failed.String(){
 		outLog.Println("Reported failure not coordinator, ignore.")
 		return InvalidFailureError(failed.String())
 	}
 
 	if len(allFailures.nodes) == 0 {
+		allFailures.nodes = make(map[string]bool)
 		voteInPlace = true
 		outLog.Println("First reported failure of coordinator ", failed, " received from ", reporter)
 
@@ -250,7 +251,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 		go DetectCoordinatorFailure(time.Now().UnixNano())
 
 	} else {
-		if _, ok := allFailures.nodes[reporter.String()]; !ok {
+		if _, ok := allFailures.nodes[reporter.String()] ; !ok {
 			outLog.Println("Reported failure of coordinator ", failed, " received from ", reporter)
 
 			// if coordinator failure report has not yet been received by this reporter,
@@ -271,7 +272,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 	var didFail bool = false
 	quorum := getQuorumNum()
 
-	for time.Now().UnixNano() < timestamp+voteTimeout {
+	for time.Now().UnixNano() < timestamp + voteTimeout {
 		allFailures.RLock()
 		if len(allFailures.nodes) >= quorum {
 			//quorum reached, coordinator failed
@@ -364,14 +365,15 @@ func ElectCoordinator() string {
 	var electedCoordinator string
 	mostPopular := []string{}
 
-	for node, numVotes := range allVotes.votes {
-		if len(mostPopular) == 0 { // append first node of list
+
+	for node, numVotes := range allVotes.votes{
+		if len(mostPopular) == 0 {						// append first node of list
 			mostPopular = append(mostPopular, node)
 			maxVotes = numVotes
-		} else if numVotes > maxVotes { // if current node has more votes than the ones seen before, replace entire list with this node
+		} else if numVotes > maxVotes {					// if current node has more votes than the ones seen before, replace entire list with this node
 			mostPopular = nil
 			mostPopular = append(mostPopular, node)
-		} else if numVotes == maxVotes { // if current node has the max number of notes, add to list
+		} else if numVotes == maxVotes {				// if current node has the max number of notes, add to list
 			mostPopular = append(mostPopular, node)
 		}
 	}
@@ -379,7 +381,7 @@ func ElectCoordinator() string {
 	if len(mostPopular) > 1 {
 		// if there is a tie, elect randomly
 		rand.Seed(time.Now().UnixNano())
-		index := rand.Intn(len(mostPopular) - 1)
+		index  := rand.Intn(len(mostPopular) - 1)
 		electedCoordinator = mostPopular[index]
 		outLog.Println("Tie exists.  Randomly elected new coordinator: ", electedCoordinator)
 		return electedCoordinator
@@ -428,7 +430,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 		args := NodeInfo{
 			Address: newCoordinator.Address,
-			ID:      newCoordinator.ID,
+			ID: newCoordinator.ID,
 		}
 		var reply int
 
@@ -471,17 +473,17 @@ func getQuorumNum() int {
 	return len(allNodes.nodes)/2 + 1
 }
 
-func castVote(addr string) {
+func castVote (addr string) {
 	allVotes.Lock()
 	defer allVotes.Unlock()
 
-	if _, ok := allVotes.votes[addr]; ok {
+	if _, ok := allVotes.votes[addr] ; ok {
 		allVotes.votes[addr]++
 	} else {
 		allVotes.votes[addr] = 1
 	}
 
-	outLog.Println("Vote for ", addr, " casted.")
+	outLog.Println("Vote for " , addr , " casted.")
 }
 
 func main() {
