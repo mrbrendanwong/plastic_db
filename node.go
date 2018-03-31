@@ -604,6 +604,9 @@ func getQuorumNum() int {
 	}
 	allNodes.RLock()
 	defer allNodes.RUnlock()
+	if len(allNodes.nodes) <= 2 {
+		return 1
+	}
 	return len(allNodes.nodes)/2 + 1
 }
 

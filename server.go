@@ -297,10 +297,11 @@ func DetectCoordinatorFailure(timestamp int64) {
 				newCoordinator = *node
 			}
 		}
-		outLog.Println("Quorum reports of coordinator reached.")
+		outLog.Println("Quorum reports of coordinator reached.", newCoordinator.Address)
 
 		// Remove previous coordinator from all from list of nodes
 		allNodes.Lock()
+		delete(allNodes.nodes, currentCoordinator.ID)					//TODO: need to choose allNodes index to be either ID or string
 		delete(allNodes.nodes, currentCoordinator.Address.String())
 		outLog.Println(currentCoordinator.Address, " removed.")
 		allNodes.Unlock()
@@ -310,7 +311,11 @@ func DetectCoordinatorFailure(timestamp int64) {
 			// Broadcasting to new coordinator failed, elect new coordinator
 			outLog.Println("Broadcast failed.  Choosing new coordinator...")
 			allNodes.Lock()
+
+			// TODO: need to choose allNodes index to be either ID or String not both
+			delete(allNodes.nodes, newCoordinator.ID)
 			delete(allNodes.nodes, newCoordinator.Address.String())
+
 			allNodes.Unlock()
 			allVotes.Lock()
 			delete(allVotes.votes, newCoordinator.Address.String())
@@ -395,7 +400,7 @@ func ElectCoordinator() string {
 // Broadcasts new coordinator to all nodes in network
 // Returns error if new coordinator fails to accept this role
 func BroadcastCoordinator(newCoordinator Node) (err error) {
-	outLog.Println("Broadcasting new coordinator...")
+	outLog.Println("Broadcasting new coordinator..", newCoordinator.Address.String())
 
 	conn, err := rpc.Dial("tcp", newCoordinator.Address.String())
 	if err != nil {
