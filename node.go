@@ -364,6 +364,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 
 	if addr.String() == LocalAddr.String() {
 		outLog.Println("I am the new coordinator!")
+		allNodes.nodes[addr.String()].IsCoordinator = true
 		isCoordinator = true
 		ReportForCoordinatorDuty(ServerAddr)
 	} else {
@@ -588,6 +589,10 @@ func RemoveNode(node net.Addr) {
 		Address: node,
 	}
 	for _, n := range allNodes.nodes {
+		if n.Address.String() == LocalAddr.String(){
+			// Do not send notice to self
+			continue
+		}
 		err := n.NodeConn.Call("KVNode.NodeFailureAlert", &args, &reply)
 		if err != nil {
 			outLog.Println("Failure broadcast failed to ", n.Address)

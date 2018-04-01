@@ -161,12 +161,14 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 	nextID++
 
 	// Define errors
-	if _, exists := allNodes.nodes[id]; exists {
-		return IDAlreadyRegisteredError(id);
+	for _, node := range allNodes.nodes {
+		if node.ID == id {
+			return IDAlreadyRegisteredError(id)
+		}
 	}
 
 	// Set node information and add to map
-	allNodes.nodes[id] = &Node{
+	allNodes.nodes[nodeInfo.Address.String()] = &Node{
 		ID: 		   id,
 		IsCoordinator: false,
 		Address:       nodeInfo.Address,
@@ -174,15 +176,15 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 	// Check if this is the first node; if so set iscoordinator
 	// and set current coordinator
 	if len(allNodes.nodes) == 1 {
-		allNodes.nodes[id].IsCoordinator = true
+		allNodes.nodes[nodeInfo.Address.String()].IsCoordinator = true
 		// Set current coordinator
-		currentCoordinator = *allNodes.nodes[id]
+		currentCoordinator = *allNodes.nodes[nodeInfo.Address.String()]
 	}
 
 	// Reply
 	*settings = RegistrationPackage{Settings: config.NodeSettings,
 		ID:            id,
-		IsCoordinator: allNodes.nodes[id].IsCoordinator}
+		IsCoordinator: allNodes.nodes[nodeInfo.Address.String()].IsCoordinator}
 
 	outLog.Printf("Got register from %s\n", nodeInfo.Address.String())
 	outLog.Printf("Gave node ID %s\n", id)
@@ -290,6 +292,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 		var newCoordinator Node
 		for _, node := range allNodes.nodes{
 			if node.Address.String() == newCoordinatorAddr{
+				node.IsCoordinator = true
 				newCoordinator = *node
 			}
 		}
@@ -297,7 +300,6 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 		// Remove previous coordinator from all from list of nodes
 		allNodes.Lock()
-		delete(allNodes.nodes, currentCoordinator.ID)					//TODO: need to choose allNodes index to be either ID or string
 		delete(allNodes.nodes, currentCoordinator.Address.String())
 		outLog.Println(currentCoordinator.Address, " removed.")
 		allNodes.Unlock()
@@ -308,8 +310,6 @@ func DetectCoordinatorFailure(timestamp int64) {
 			outLog.Println("Broadcast failed.  Choosing new coordinator...")
 			allNodes.Lock()
 
-			// TODO: need to choose allNodes index to be either ID or String not both
-			delete(allNodes.nodes, newCoordinator.ID)
 			delete(allNodes.nodes, newCoordinator.Address.String())
 
 			allNodes.Unlock()
