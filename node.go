@@ -550,7 +550,9 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 
 			// Remove from pending failures
 			allFailures.Lock()
-			delete(allFailures.nodes, failureAddr.String())
+			if _, ok := allFailures.nodes[failureAddr.String()]; ok{
+				delete(allFailures.nodes, failureAddr.String())
+			}
 			allFailures.Unlock()
 
 			RemoveNode(failureAddr)
@@ -572,7 +574,9 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 func RemoveNode(node net.Addr) {
 	outLog.Println("Removing ", node)
 	allNodes.Lock()
-	delete(allNodes.nodes, node.String())
+	if _, ok := allNodes.nodes[node.String()]; ok{
+		delete(allNodes.nodes, node.String())
+	}
 	allNodes.Unlock()
 
 	allNodes.RLock()
@@ -604,6 +608,9 @@ func getQuorumNum() int {
 	}
 	allNodes.RLock()
 	defer allNodes.RUnlock()
+	if len(allNodes.nodes) <= 2 {
+		return 1
+	}
 	return len(allNodes.nodes)/2 + 1
 }
 
