@@ -57,10 +57,6 @@ func (e InvalidFailureError) Error() string {
 	return fmt.Sprintf("Server: Failure Alert invalid. Ignoring. [%s]", string(e))
 }
 
-type ConnectionFailureError string
-func (e ConnectionFailureError) Error() string {
-	return fmt.Sprintf("Server: Failure to connect to node. [%s]", string(e))
-}
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ////////////////////////////////////////////////////////////////////////////////
@@ -404,8 +400,8 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 	conn, err := rpc.Dial("tcp", newCoordinator.Address.String())
 	if err != nil {
-		outLog.Println("Error connecting to new coordinator. ", newCoordinator.Address.String())
-		return ConnectionFailureError(newCoordinator.Address.String())
+		errLog.Println("Error connecting to new coordinator", newCoordinator.Address.String())
+		return err
 	}
 
 	args := NodeInfo{
@@ -416,8 +412,8 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 	var reply int
 	err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 	if err != nil {
-		outLog.Println("Error broadcasting to new coordinator. ", newCoordinator.Address.String())
-		return ConnectionFailureError(newCoordinator.Address.String())
+		errLog.Println("Error connecting to new coordinator", newCoordinator.Address.String())
+		return err
 	}
 
 	// Broadcast to all other nodes
