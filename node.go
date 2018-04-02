@@ -762,7 +762,6 @@ func writeValueToNodes(key string, value string) {
 
 			// Record successes
 			if nodeReply.Success {
-				successes++
 				outLog.Printf("Successfully wrote to node %s!\n", node.ID)
 			} else {
 				outLog.Printf("Failed to write to node %s...\n", node.ID)
