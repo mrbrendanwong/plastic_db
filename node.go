@@ -373,6 +373,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 
 	if addr.String() == LocalAddr.String() {
 		outLog.Println("I am the new coordinator!")
+		allNodes.nodes[addr.String()].IsCoordinator = true
 		isCoordinator = true
 		ReportForCoordinatorDuty(ServerAddr)
 	} else {
@@ -665,7 +666,9 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 
 			// Remove from pending failures
 			allFailures.Lock()
-			delete(allFailures.nodes, failureAddr.String())
+			if _, ok := allFailures.nodes[failureAddr.String()]; ok {
+				delete(allFailures.nodes, failureAddr.String())
+			}
 			allFailures.Unlock()
 
 			RemoveNode(failureAddr)
@@ -687,7 +690,9 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 func RemoveNode(node net.Addr) {
 	outLog.Println("Removing ", node)
 	allNodes.Lock()
-	delete(allNodes.nodes, node.String())
+	if _, ok := allNodes.nodes[node.String()]; ok {
+		delete(allNodes.nodes, node.String())
+	}
 	allNodes.Unlock()
 
 	allNodes.RLock()
@@ -699,6 +704,10 @@ func RemoveNode(node net.Addr) {
 		Address: node,
 	}
 	for _, n := range allNodes.nodes {
+		if n.Address.String() == LocalAddr.String() {
+			// Do not send notice to self
+			continue
+		}
 		err := n.NodeConn.Call("KVNode.NodeFailureAlert", &args, &reply)
 		if err != nil {
 			outLog.Println("Failure broadcast failed to ", n.Address)
@@ -720,7 +729,7 @@ func getQuorumNum() int {
 	allNodes.RLock()
 	defer allNodes.RUnlock()
 	size := len(allNodes.nodes)/2 + 1
-	if size == 2 {
+	if size <= 2 {
 		return 1
 	}
 	return size
