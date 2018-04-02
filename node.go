@@ -725,15 +725,22 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 		} else {
 			result = results[rand.Intn(len(results)-1)]
 		}
+		// update coordinator kvstore
 		kvstore.Lock()
 		kvstore.store[args.Key] = result
 		kvstore.Unlock()
 		outLog.Println("Sending Read decision to back-up nodes")
-		writeValueToNodes(args.Key, result)
+		sendWriteToNodes(args.Key, result)
 		reply.Value = result
 		reply.Success = true
 
 	} else {
+		// update coordinator kvstore
+		kvstore.Lock()
+		delete(kvstore.store, args.Key)
+		kvstore.Unlock()
+		outLog.Println("Sending Delete to back-up nodes")
+		sendDeleteToNodes(args.Key)
 		reply.Value = ""
 		reply.Success = false
 	}
@@ -741,7 +748,7 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	return nil
 }
 
-func writeValueToNodes(key string, value string) {
+func sendWriteToNodes(key string, value string) {
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -768,6 +775,37 @@ func writeValueToNodes(key string, value string) {
 			}
 		}
 	}
+}
+
+func sendDeleteToNodes(key string) {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// Attempt delete from backup nodes
+	for _, node := range allNodes.nodes {
+		if !node.IsCoordinator {
+			outLog.Printf("Deleting from node %s...\n", node.ID)
+
+			nodeArgs := DeleteRequest{
+				Key: key,
+			}
+			nodeReply := OpReply{}
+
+			err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
+			if err != nil {
+				outLog.Println("Could not delete from node ", err)
+			}
+
+			// Record successes
+			if nodeReply.Success {
+				outLog.Printf("Successfully deleted from node %s!\n", node.ID)
+			} else {
+				outLog.Printf("Failed to delete from node %s...\n", node.ID)
+			}
+		}
+
+	}
+
 }
 
 func addToValuesMap(valuesMap map[string]int, val string) {
