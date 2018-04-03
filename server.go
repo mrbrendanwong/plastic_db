@@ -284,6 +284,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 	if !didFail {
 		// timeout, reports are invalid
 		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
+		return
 	}
 
 	for {
