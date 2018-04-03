@@ -435,7 +435,7 @@ func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
 
 // Request KVstore values from the coordinator
 func GetValuesFromCoordinator() {
-	var reply map[string]string
+	var reply int
 	info := NodeInfo{
 		ID:      ID,
 		Address: LocalAddr,
@@ -455,28 +455,31 @@ func GetValuesFromCoordinator() {
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
 
-// Return a map of kvs to the newly joined node
-func (n KVNode) RequestValues(info *NodeInfo, nodeMap *map[string]string) error {
+// Reads and broadcasts all values in map so newly joined nodes has all the values (Local version of CoordinatorRead)
+func (n KVNode) RequestValues(info *NodeInfo, _unused *int) error {
+	if !isCoordinator {
+		handleErrorFatal("Network node attempting to run coordinator node function.", nil)
+	}
+
 	outLog.Println("Coordinator retrieving majority values for new node...")
 
 	// for every key in kvstore
 	kvstore.RLock()
+	defer kvstore.RUnlock()
 	for key, value := range kvstore.store {
 		valuesMap := make(map[string]int)
 
 		// add own value to valuemap if it exists
-		kvstore.RLock()
 		_, ok := kvstore.store[args.Key]
 		if ok {
 			addToValuesMap(valuesMap, kvstore.store[args.Key])
 		}
-		kvstore.RUnlock()
 
 		// ask all nodes but new node for their values (vote)
 		allNodes.Lock()
 		outLog.Println("Attempting to read back-up nodes...")
 		for _, node := range allNodes.nodes {
-			if !node.IsCoordinator && node.ID != info.ID {
+			if !node.IsCoordinator && node.Address != info.Address {
 				outLog.Printf("Reading from Node %s...\n", node.ID)
 
 				nodeArgs := args
@@ -518,10 +521,13 @@ func (n KVNode) RequestValues(info *NodeInfo, nodeMap *map[string]string) error 
 
 		// If read value is not quorum size, delete
 		if largestCount < quorum {
+			kvstore.Lock()
 			delete(kvstore.store, key)
-			// TODO broadcast delete to all the nodes
+			kvstore.Unlock()
+			sendDeleteToNodes(args.Key)
 		}
 
+		// Otherwise broadcast results to back up nodes
 		if len(results) != 0 {
 			var result string
 			if len(results) == 1 {
@@ -532,13 +538,9 @@ func (n KVNode) RequestValues(info *NodeInfo, nodeMap *map[string]string) error 
 			kvstore.Lock()
 			kvstore.store[args.Key] = result
 			kvstore.Unlock()
+			sendWriteToNodes(args.Key, result)
 		}
-		// TODO broadcast result to all nodes
 	}
-
-	// TODO: for now, just return the kvstore. Otherwise, if it broadcasts, then a return is not needed
-	*reply = kvstore.store
-	kvstore.RUnlock()
 
 	return nil
 }
