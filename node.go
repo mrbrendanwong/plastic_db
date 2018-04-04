@@ -290,7 +290,15 @@ func GetNodes() (err error) {
 			}
 		}
 	}
+
+	// Add self to allNodes map
 	AddSelfToMap()
+
+	// Ask coordinator for values in kvstore
+	if !isCoordinator {
+		GetValuesFromCoordinator()
+	}
+
 	return nil
 }
 
@@ -306,6 +314,7 @@ func AddSelfToMap() {
 	allNodes.Unlock()
 }
 
+// Report node failure to coordinator
 func ReportNodeFailure(node *Node) {
 	info := &FailureInfo{
 		Failed:   node.Address,
@@ -424,9 +433,42 @@ func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
 	return nil
 }
 
+// Request KVstore values from the coordinator
+func GetValuesFromCoordinator() {
+	var unused int
+	var reply map[string]string
+
+	outLog.Println("Requesting map values from coordinator...")
+
+	err := Coordinator.NodeConn.Call("KVNode.RequestValues", unused, &reply)
+	if err != nil {
+		outLog.Printf("Could not retrieve kvstore values from coordinator: %s\n", err)
+	}
+
+	kvstore.Lock()
+	kvstore.store = reply
+	kvstore.Unlock()
+
+	kvstore.RLock()
+	outLog.Printf("This is the map:%v\n", kvstore.store)
+	kvstore.RUnlock()
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+
+// Return kvstore to requesting node
+func (n KVNode) RequestValues(unused int, reply *map[string]string) error {
+	if !isCoordinator {
+		handleErrorFatal("Network node attempting to run coordinator node function.", nil)
+	}
+	outLog.Println("Coordinator retrieving majority values for new node...")
+	kvstore.RLock()
+	*reply = kvstore.store
+	kvstore.RUnlock()
+	return nil
+}
 
 // Report to server as coordinator
 func ReportForCoordinatorDuty(serverAddr string) {
@@ -606,17 +648,18 @@ func RemoveNode(node net.Addr) {
 	}
 }
 
-// Returns quorum: num nodes / 2 + 1
+// Returns quorum: num nodes / 2 + 1 or 1 if num nodes == 2
 func getQuorumNum() int {
 	if !isCoordinator {
 		handleErrorFatal("Not a network node function.", nil)
 	}
 	allNodes.RLock()
 	defer allNodes.RUnlock()
-	if len(allNodes.nodes) <= 2 {
+	size := len(allNodes.nodes)/2 + 1
+	if size <= 2 {
 		return 1
 	}
-	return len(allNodes.nodes)/2 + 1
+	return size
 }
 
 // Vote for who they think should be the new coordinator
@@ -659,6 +702,8 @@ func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+
+// Read request to coordinator
 func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	outLog.Println("Coordinator received read operation")
 
@@ -704,7 +749,6 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 
 	// Find value with majority and set in local kvstore
 	// If no majority value exists, return success - false
-	// TODO send out decision to all nodes or only nodes that don't have this value
 	var results []string
 	largestCount := 0
 	for val, count := range valuesMap {
@@ -869,7 +913,7 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold {
+	if successRatio >= threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Back up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
@@ -952,7 +996,7 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 	outLog.Println("This is the delete success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold {
+	if successRatio >= threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Delete from back-up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
