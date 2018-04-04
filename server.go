@@ -262,11 +262,10 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 func DetectCoordinatorFailure(timestamp int64) {
 
 	var didFail bool = false
-	//quorum := getQuorumNum()
 
 	for time.Now().UnixNano() < timestamp + voteTimeout {
 		allFailures.RLock()
-		if len(allFailures.nodes) >= getQuorumNum() {
+		if len(allFailures.nodes) >= getQuorumNum() - 1 {		// coordinator does not take place in vote
 			//quorum reached, coordinator failed
 			didFail = true
 			allFailures.RUnlock()
@@ -279,7 +278,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 		// timeout, reports are invali
 		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
 		outLog.Println("Votes: ", len(allFailures.nodes))
-		outLog.Println("Quorum: ", getQuorumNum())
+		outLog.Println("Quorum: ", getQuorumNum() - 1)
 
 		// clear map of failures ad votes
 		allFailures.nodes = make(map[string]bool)
@@ -384,7 +383,7 @@ func ElectCoordinator() string {
 		rand.Seed(time.Now().UnixNano())
 		index := rand.Intn(len(mostPopular) - 1)
 		electedCoordinator = mostPopular[index]
-		outLog.Println("Tie exists.  Randomly elected new coordinator: ")
+		outLog.Println("Tie exists.  Randomly elected new coordinator: ", electedCoordinator)
 		return electedCoordinator
 	}
 
@@ -487,7 +486,7 @@ func getQuorumNum() int {
 	if len(allNodes.nodes) <= 2 {
 		return 1
 	}
-	return len(allNodes.nodes)/2 - 1
+	return len(allNodes.nodes)/2 + 1
 }
 
 func castVote(addr string) {
