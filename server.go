@@ -38,7 +38,7 @@ func (e IDAlreadyRegisteredError) Error() string {
 }
 
 // Address already registered in the server
-type AddressAlreadyRegisteredError string 
+type AddressAlreadyRegisteredError string
 
 func (e AddressAlreadyRegisteredError) Error() string {
 	return fmt.Sprintf("Server: Address already registered [%s]", string(e))
@@ -169,7 +169,7 @@ func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage
 
 	// Set node information and add to map
 	allNodes.nodes[nodeInfo.Address.String()] = &Node{
-		ID: 		   id,
+		ID:            id,
 		IsCoordinator: false,
 		Address:       nodeInfo.Address,
 	}
@@ -291,8 +291,8 @@ func DetectCoordinatorFailure(timestamp int64) {
 		newCoordinatorAddr := ElectCoordinator()
 
 		var newCoordinator Node
-		for _, node := range allNodes.nodes{
-			if node.Address.String() == newCoordinatorAddr{
+		for _, node := range allNodes.nodes {
+			if node.Address.String() == newCoordinatorAddr {
 				node.IsCoordinator = true
 				newCoordinator = *node
 			}
@@ -329,6 +329,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 			break
 		}
 	}
+	voteInPlace = false
 	return
 }
 
@@ -351,14 +352,13 @@ func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error
 func ElectCoordinator() string {
 	allNodes.RLock()
 	for _, node := range allNodes.nodes {
-		if _, ok := allVotes.votes[node.Address.String()] ; !ok {
+		if _, ok := allVotes.votes[node.Address.String()]; !ok {
 			allVotes.Lock()
 			allVotes.votes[node.Address.String()] = 0
 			allVotes.Unlock()
 		}
 	}
 	allNodes.RUnlock()
-
 
 	allVotes.RLock()
 	defer allVotes.RUnlock()
@@ -367,15 +367,14 @@ func ElectCoordinator() string {
 	var electedCoordinator string
 	mostPopular := []string{}
 
-
-	for node, numVotes := range allVotes.votes{
-		if len(mostPopular) == 0 {						// append first node of list
+	for node, numVotes := range allVotes.votes {
+		if len(mostPopular) == 0 { // append first node of list
 			mostPopular = append(mostPopular, node)
 			maxVotes = numVotes
-		} else if numVotes > maxVotes {					// if current node has more votes than the ones seen before, replace entire list with this node
+		} else if numVotes > maxVotes { // if current node has more votes than the ones seen before, replace entire list with this node
 			mostPopular = nil
 			mostPopular = append(mostPopular, node)
-		} else if numVotes == maxVotes {				// if current node has the max number of notes, add to list
+		} else if numVotes == maxVotes { // if current node has the max number of notes, add to list
 			mostPopular = append(mostPopular, node)
 		}
 	}
@@ -383,7 +382,7 @@ func ElectCoordinator() string {
 	if len(mostPopular) > 1 {
 		// if there is a tie, elect randomly
 		rand.Seed(time.Now().UnixNano())
-		index  := rand.Intn(len(mostPopular) - 1)
+		index := rand.Intn(len(mostPopular) - 1)
 		electedCoordinator = mostPopular[index]
 		outLog.Println("Tie exists.  Randomly elected new coordinator: ")
 		return electedCoordinator
@@ -407,7 +406,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 	args := NodeInfo{
 		Address: newCoordinator.Address,
-		ID: newCoordinator.ID,
+		ID:      newCoordinator.ID,
 	}
 
 	var reply int
@@ -438,7 +437,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 		args := NodeInfo{
 			Address: newCoordinator.Address,
-			ID: newCoordinator.ID,
+			ID:      newCoordinator.ID,
 		}
 		var reply int
 
@@ -458,7 +457,14 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 // GetCoordinatorAddress sends coord address
 func (s *KVServer) GetCoordinatorAddress(msg int, response *net.Addr) error {
-	*response = currentCoordinator.Address
+	for {
+		if !voteInPlace {
+			*response = currentCoordinator.Address
+			break
+		} else {
+			time.Sleep(1 * time.Second)
+		}
+	}
 	return nil
 }
 
@@ -484,17 +490,17 @@ func getQuorumNum() int {
 	return len(allNodes.nodes)/2 - 1
 }
 
-func castVote (addr string) {
+func castVote(addr string) {
 	allVotes.Lock()
 	defer allVotes.Unlock()
 
-	if _, ok := allVotes.votes[addr] ; ok {
+	if _, ok := allVotes.votes[addr]; ok {
 		allVotes.votes[addr]++
 	} else {
 		allVotes.votes[addr] = 1
 	}
 
-	outLog.Println("Vote for " , addr , " casted.")
+	outLog.Println("Vote for ", addr, " casted.")
 }
 
 func main() {
