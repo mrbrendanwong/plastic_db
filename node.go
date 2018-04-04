@@ -450,7 +450,7 @@ func GetValuesFromCoordinator() {
 	kvstore.Unlock()
 
 	kvstore.RLock()
-	fmt.Printf("this is the map:%v\n", kvstore.store)
+	outLog.Printf("This is the map:%v\n", kvstore.store)
 	kvstore.RUnlock()
 }
 
