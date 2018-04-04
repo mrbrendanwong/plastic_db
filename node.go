@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"./dkvlib"
+	"github.com/DistributedClocks/GoVector/govec"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -61,8 +62,10 @@ func (e InvalidPermissionsError) Error() string {
 
 // Variables related to general node function
 var (
-	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	errLog                    *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog                    *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	goVectorCoordinatorLogger *govec.GoLog
+	goVectorNetworkNodeLogger *govec.GoLog
 )
 
 // Variable related to the node
@@ -106,7 +109,7 @@ type NodeSettings struct {
 	VotingWait           uint32  `json:"voting-wait"`
 	ElectionWait         uint32  `json:"election-wait"`
 	ServerUpdateInterval uint32  `json:"server-update-interval"`
-	ReconnectionAttempts int	 `json:"reconnection-attempts"`
+	ReconnectionAttempts int     `json:"reconnection-attempts"`
 	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
@@ -163,25 +166,30 @@ type CoordinatorFailureInfo struct {
 type KVNode int
 
 type ReadRequest struct {
-	Key string
+	Key        string
+	LoggerInfo []byte
 }
 
 type ReadReply struct {
-	Value   string
-	Success bool
+	Value      string
+	Success    bool
+	LoggerInfo []byte
 }
 
 type WriteRequest struct {
-	Key   string
-	Value string
+	Key        string
+	Value      string
+	LoggerInfo []byte
 }
 
 type DeleteRequest struct {
-	Key string
+	Key        string
+	LoggerInfo []byte
 }
 
 type OpReply struct {
-	Success bool
+	Success    bool
+	LoggerInfo []byte
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -275,8 +283,10 @@ func RegisterNode() (err error) {
 
 	if isCoordinator {
 		outLog.Printf("Received node ID %s and this node is the coordinator!", ID)
+		goVectorCoordinatorLogger = govec.InitGoVector("Coordinator", "LogFile"+ID)
 	} else {
 		outLog.Printf("Received node ID %s and this node is a network node", ID)
+		goVectorNetworkNodeLogger = govec.InitGoVector("Node"+ID, "LogFile"+ID)
 	}
 
 	return nil
@@ -395,6 +405,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 		outLog.Println("I am the new coordinator!")
 		allNodes.nodes[addr.String()].IsCoordinator = true
 		isCoordinator = true
+		goVectorCoordinatorLogger = govec.InitGoVector("[Coordinator]", "LogFile"+ID)
 		ReportForCoordinatorDuty(ServerAddr)
 	} else {
 		if _, ok := allNodes.nodes[addr.String()]; ok {
@@ -520,10 +531,10 @@ func ReconnectServer(serverAddr string) (err error) {
 
 	var numAttempts = Settings.ReconnectionAttempts
 
-	for i := 0 ; i < numAttempts ; i++ {
+	for i := 0; i < numAttempts; i++ {
 		outLog.Println("Attempting to reconnect to server for the ", i, "time")
 		conn, err = rpc.Dial("tcp", serverAddr)
-		if err == nil{
+		if err == nil {
 			outLog.Println("Reconnection succeeded.")
 			Server = conn
 			return nil
@@ -535,7 +546,7 @@ func ReconnectServer(serverAddr string) (err error) {
 }
 
 // Resign from coordinator role
-func CoordinatorResign(){
+func CoordinatorResign() {
 	if !isCoordinator {
 		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()))
 		return
@@ -549,8 +560,8 @@ func CoordinatorResign(){
 		}
 
 		args := &FailureInfo{
-			Reporter:LocalAddr,
-			Failed:LocalAddr,
+			Reporter: LocalAddr,
+			Failed:   LocalAddr,
 		}
 		var reply int
 		err := node.NodeConn.Call("KVNode.CoordinatorResign", &args, &reply)
@@ -599,7 +610,7 @@ func SaveNodeFailure(node *Node) {
 	addr := node.Address
 
 	if !isCoordinator {
-		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()) )
+		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()))
 	}
 	allFailures.Lock()
 	if node, ok := allFailures.nodes[addr.String()]; ok {
@@ -959,6 +970,7 @@ func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
 
 // Writing a KV pair to the coordinator node
 func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
+
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -972,10 +984,14 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 			nodeArgs := args
 			nodeReply := OpReply{}
 
+			//GoVector Logging Prepare a Message
+			sendingMsg := goVectorCoordinatorLogger.PrepareSend("[Coordinator] Sending Write from Coordinator to Node", nodeArgs)
+			nodeArgs.LoggerInfo = sendingMsg
 			err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
 			if err != nil {
 				outLog.Println("Could not write to node ", err)
 			}
+			goVectorCoordinatorLogger.UnpackReceive("[Coordinator]: Receiving Ack/Nack from node", nodeReply.LoggerInfo, &OpReply{})
 
 			// Record successes
 			if nodeReply.Success {
@@ -986,6 +1002,8 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 			}
 		}
 	}
+
+	goVectorCoordinatorLogger.LogLocalEvent("[Coordinator Node] Done writing to all nodes")
 
 	// Check if majority of writes suceeded
 	threshold := Settings.MajorityThreshold
@@ -1024,6 +1042,8 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 
 // Writing a KV pair to the network nodes
 func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
+	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+" ]: Receiving Write from Coordinator", args.LoggerInfo, &WriteRequest{})
+
 	outLog.Println("Received write request from coordinator!")
 	key := args.Key
 	value := args.Value
@@ -1038,7 +1058,9 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	}
 	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
-	*reply = OpReply{Success: true}
+	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
+
+	*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 
 	return nil
 }
@@ -1057,11 +1079,16 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 
 			nodeArgs := args
 			nodeReply := OpReply{}
+			//GoVector Logging Prepare a Message
+			sendingMsg := goVectorCoordinatorLogger.PrepareSend("[Coordinator] Sending Delete from Coordinator to Node", nodeArgs)
+			nodeArgs.LoggerInfo = sendingMsg
 
 			err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
 			if err != nil {
 				outLog.Println("Could not delete from node ", err)
 			}
+
+			goVectorCoordinatorLogger.UnpackReceive("[Coordinator]: Receiving Ack/Nack from node", nodeReply.LoggerInfo, &OpReply{})
 
 			// Record successes
 			if nodeReply.Success {
@@ -1073,6 +1100,8 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 		}
 
 	}
+
+	goVectorCoordinatorLogger.LogLocalEvent("[Coordinator Node] Done Deleting from all nodes")
 
 	// Check if majority of deletes suceeded
 	threshold := Settings.MajorityThreshold
@@ -1116,6 +1145,8 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 
 // Deleting a KV pair from the network nodes
 func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
+	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+" ]: Receiving Delete from Coordinator", args.LoggerInfo, &DeleteRequest{})
+
 	outLog.Println("Received delete request from coordinator!")
 	kvstore.Lock()
 	defer kvstore.Unlock()
@@ -1135,7 +1166,9 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 	}
 	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
-	*reply = OpReply{Success: true}
+	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
+
+	*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 
 	return nil
 }
