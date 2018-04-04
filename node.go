@@ -435,13 +435,12 @@ func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
 
 // Request KVstore values from the coordinator
 func GetValuesFromCoordinator() {
-	var reply int
-	info := NodeInfo{
-		ID:      ID,
-		Address: LocalAddr,
-	}
+	var unused int
+	var reply map[string]string
 
-	err := Coordinator.NodeConn.Call("KVNode.RequestValues", &info, &reply)
+	outLog.Println("Requesting map values from coordinator...")
+
+	err := Coordinator.NodeConn.Call("KVNode.RequestValues", unused, &reply)
 	if err != nil {
 		outLog.Printf("Could not retrieve kvstore values from coordinator: %s\n", err)
 	}
@@ -449,99 +448,25 @@ func GetValuesFromCoordinator() {
 	kvstore.Lock()
 	kvstore.store = reply
 	kvstore.Unlock()
+
+	kvstore.RLock()
+	fmt.Printf("this is the map:%v\n", kvstore.store)
+	kvstore.RUnlock()
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
 
-// Reads and broadcasts all values in map so newly joined nodes has all the values (Local version of CoordinatorRead)
-func (n KVNode) RequestValues(info *NodeInfo, _unused *int) error {
+// Return kvstore to requesting node
+func (n KVNode) RequestValues(unused int, reply *map[string]string) error {
 	if !isCoordinator {
 		handleErrorFatal("Network node attempting to run coordinator node function.", nil)
 	}
-
 	outLog.Println("Coordinator retrieving majority values for new node...")
-
-	// for every key in kvstore
 	kvstore.RLock()
-	defer kvstore.RUnlock()
-	for key, value := range kvstore.store {
-		valuesMap := make(map[string]int)
-
-		// add own value to valuemap if it exists
-		_, ok := kvstore.store[args.Key]
-		if ok {
-			addToValuesMap(valuesMap, kvstore.store[args.Key])
-		}
-
-		// ask all nodes but new node for their values (vote)
-		allNodes.Lock()
-		outLog.Println("Attempting to read back-up nodes...")
-		for _, node := range allNodes.nodes {
-			if !node.IsCoordinator && node.Address != info.Address {
-				outLog.Printf("Reading from Node %s...\n", node.ID)
-
-				nodeArgs := args
-				nodeReply := ReadReply{}
-
-				err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
-				if err != nil {
-					outLog.Println("Could not reach node ", node.ID)
-				}
-
-				// Record successes
-				if !nodeReply.Success {
-					outLog.Printf("Failed to read from node %s... \n", node.ID)
-				} else {
-					outLog.Printf("Successfully read from node %s...\n", node.ID)
-					addToValuesMap(valuesMap, nodeReply.Value)
-				}
-			}
-
-		}
-		allNodes.Unlock()
-
-		//  num network nodes -1 because new node has no info
-		quorum := getQuorumNum() - 1
-
-		// set majority value in local kvstore
-		// TODO send out decision to all nodes or only nodes that don't have this value
-		var results []string
-		largestCount := 0
-		for val, count := range valuesMap {
-			if count > largestCount {
-				largestCount = count
-				results = nil
-				results = append(results, val)
-			} else if count == largestCount {
-				results = append(results, val)
-			}
-		}
-
-		// If read value is not quorum size, delete
-		if largestCount < quorum {
-			kvstore.Lock()
-			delete(kvstore.store, key)
-			kvstore.Unlock()
-			sendDeleteToNodes(args.Key)
-		}
-
-		// Otherwise broadcast results to back up nodes
-		if len(results) != 0 {
-			var result string
-			if len(results) == 1 {
-				result = results[0]
-			} else {
-				result = results[rand.Intn(len(results)-1)]
-			}
-			kvstore.Lock()
-			kvstore.store[args.Key] = result
-			kvstore.Unlock()
-			sendWriteToNodes(args.Key, result)
-		}
-	}
-
+	*reply = kvstore.store
+	kvstore.RUnlock()
 	return nil
 }
 
@@ -824,7 +749,6 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 
 	// Find value with majority and set in local kvstore
 	// If no majority value exists, return success - false
-	// TODO send out decision to all nodes or only nodes that don't have this value
 	var results []string
 	largestCount := 0
 	for val, count := range valuesMap {
@@ -989,7 +913,7 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold {
+	if successRatio >= threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Back up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
@@ -1072,7 +996,7 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 	outLog.Println("This is the delete success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold {
+	if successRatio >= threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Delete from back-up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
