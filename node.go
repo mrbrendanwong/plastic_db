@@ -551,7 +551,7 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 
 			// Remove from pending failures
 			allFailures.Lock()
-			if _, ok := allFailures.nodes[failureAddr.String()]; ok{
+			if _, ok := allFailures.nodes[failureAddr.String()]; ok {
 				delete(allFailures.nodes, failureAddr.String())
 			}
 			allFailures.Unlock()
@@ -575,7 +575,7 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 func RemoveNode(node net.Addr) {
 	outLog.Println("Removing ", node)
 	allNodes.Lock()
-	if _, ok := allNodes.nodes[node.String()]; ok{
+	if _, ok := allNodes.nodes[node.String()]; ok {
 		delete(allNodes.nodes, node.String())
 	}
 	allNodes.Unlock()
@@ -589,7 +589,7 @@ func RemoveNode(node net.Addr) {
 		Address: node,
 	}
 	for _, n := range allNodes.nodes {
-		if n.Address.String() == LocalAddr.String(){
+		if n.Address.String() == LocalAddr.String() {
 			// Do not send notice to self
 			continue
 		}
@@ -665,6 +665,7 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	// ask all nodes for their values (vote)
 	// map of values to their count
 	valuesMap := make(map[string]int)
+	quorum := getQuorumNum()
 
 	// add own value to map if it exists
 	kvstore.RLock()
@@ -701,8 +702,8 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 
 	allNodes.Unlock()
 
-	// Find value with most votes
-	// set in local kvstore
+	// Find value with majority and set in local kvstore
+	// If no majority value exists, return success - false
 	// TODO send out decision to all nodes or only nodes that don't have this value
 	var results []string
 	largestCount := 0
@@ -716,24 +717,95 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 		}
 	}
 	outLog.Printf("LENGTH: %d\n", len(results))
-	if len(results) == 0 {
-		reply.Success = false
-		reply.Value = ""
-	} else {
+
+	if largestCount >= quorum {
 		var result string
 		if len(results) == 1 {
 			result = results[0]
 		} else {
 			result = results[rand.Intn(len(results)-1)]
 		}
+		// update coordinator kvstore
 		kvstore.Lock()
 		kvstore.store[args.Key] = result
 		kvstore.Unlock()
+		outLog.Println("Sending Read decision to back-up nodes")
+		sendWriteToNodes(args.Key, result)
 		reply.Value = result
 		reply.Success = true
+
+	} else {
+		// update coordinator kvstore
+		kvstore.Lock()
+		delete(kvstore.store, args.Key)
+		kvstore.Unlock()
+		outLog.Println("Sending Delete to back-up nodes")
+		sendDeleteToNodes(args.Key)
+		reply.Value = ""
+		reply.Success = false
 	}
 
 	return nil
+}
+
+func sendWriteToNodes(key string, value string) {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	for _, node := range allNodes.nodes {
+		if !node.IsCoordinator {
+			outLog.Printf("Writing to node %s...\n", node.ID)
+
+			nodeArgs := WriteRequest{
+				Key:   key,
+				Value: value,
+			}
+			nodeReply := OpReply{}
+
+			err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
+			if err != nil {
+				outLog.Println("Could not write to node ", err)
+			}
+
+			// Record successes
+			if nodeReply.Success {
+				outLog.Printf("Successfully wrote to node %s!\n", node.ID)
+			} else {
+				outLog.Printf("Failed to write to node %s...\n", node.ID)
+			}
+		}
+	}
+}
+
+func sendDeleteToNodes(key string) {
+	allNodes.Lock()
+	defer allNodes.Unlock()
+
+	// Attempt delete from backup nodes
+	for _, node := range allNodes.nodes {
+		if !node.IsCoordinator {
+			outLog.Printf("Deleting from node %s...\n", node.ID)
+
+			nodeArgs := DeleteRequest{
+				Key: key,
+			}
+			nodeReply := OpReply{}
+
+			err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
+			if err != nil {
+				outLog.Println("Could not delete from node ", err)
+			}
+
+			// Record successes
+			if nodeReply.Success {
+				outLog.Printf("Successfully deleted from node %s!\n", node.ID)
+			} else {
+				outLog.Printf("Failed to delete from node %s...\n", node.ID)
+			}
+		}
+
+	}
+
 }
 
 func addToValuesMap(valuesMap map[string]int, val string) {
