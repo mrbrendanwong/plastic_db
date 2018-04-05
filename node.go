@@ -76,7 +76,7 @@ var (
 // For coordinator
 var (
 	allFailures AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
-	voteTimeout int64       = int64(time.Millisecond * 20000)
+	voteTimeout int64
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -262,6 +262,7 @@ func RegisterNode() (err error) {
 
 	// Store node settings from server
 	Settings = regInfo.Settings
+	voteTimeout = int64(time.Millisecond * time.Duration(Settings.VotingWait))
 	ID = regInfo.ID
 	isCoordinator = regInfo.IsCoordinator
 
@@ -526,7 +527,7 @@ func UpdateOnlineNodes() {
 		} else {
 			//outLog.Println("Server's map of online nodes updated...")
 		}
-		time.Sleep(1 * time.Second)
+		time.Sleep(time.Duration(Settings.ServerUpdateInterval) * time.Millisecond)
 	}
 }
 
@@ -601,7 +602,7 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 	quorum := getQuorumNum()
 
 	// if time window has passed, and quorum not reached, failure is considered invalid
-	for time.Now().UnixNano() < timestamp+voteTimeout { //TODO: put timeout in config file
+	for time.Now().UnixNano() < timestamp+voteTimeout {
 		allFailures.RLock()
 		if len(allFailures.nodes[failureAddr.String()].reporters) >= quorum {
 			outLog.Println("Quorum votes on failure reached for ", failureAddr.String())
@@ -927,10 +928,10 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	threshold := Settings.MajorityThreshold
 	var successRatio float32
 	if len(allNodes.nodes) > 1 {
-			successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
-		} else {
-			successRatio = 1
-		}
+		successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
+	} else {
+		successRatio = 1
+	}
 	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
@@ -1014,10 +1015,10 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 	threshold := Settings.MajorityThreshold
 	var successRatio float32
 	if len(allNodes.nodes) > 1 {
-			successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
-		} else {
-			successRatio = 1
-		}
+		successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
+	} else {
+		successRatio = 1
+	}
 	outLog.Println("This is the delete success ratio:", successRatio)
 
 	// Update coordinator
@@ -1224,6 +1225,7 @@ func main() {
 	}
 
 	serverAddr := args[1]
+
 	ConnectServer(serverAddr)
 
 }

@@ -81,7 +81,7 @@ var (
 	voteInPlace bool        /* block communication with client when true */
 	allFailures AllFailures = AllFailures{nodes: make(map[string]bool)}
 	allVotes    AllVotes    = AllVotes{votes: make(map[string]int)}
-	voteTimeout int64       = int64(time.Millisecond * 20000)
+	voteTimeout int64
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -276,7 +276,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 	}
 
 	if !didFail {
-		// timeout, reports are invali
+		// timeout, reports are invalid
 		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
 		outLog.Println("Votes: ", len(allFailures.nodes))
 		outLog.Println("Quorum: ", getQuorumNum()-1)
@@ -558,6 +558,7 @@ func main() {
 	}
 
 	readConfigOrDie(*path)
+	voteTimeout = int64(time.Duration(config.NodeSettings.VotingWait) * time.Millisecond)
 
 	rand.Seed(time.Now().UnixNano())
 
