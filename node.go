@@ -392,7 +392,6 @@ func ReportCoordinatorFailure(node *Node) {
 
 	sending := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Reporting Coordinator Failure", info)
 	info.LoggerInfo = sending
-	fmt.Printf("%v", info)
 	err = Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of coordinator ", node.ID, "[", node.Address, "]")

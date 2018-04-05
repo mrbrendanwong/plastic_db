@@ -583,7 +583,7 @@ func MonitorCoordinator() {
 }
 
 func main() {
-	ServerLogger = govec.InitGoVector("[Server]", "LogFile-Server")
+	ServerLogger = govec.InitGoVector("Server", "LogFile-Server")
 
 	gob.Register(&net.TCPAddr{})
 
