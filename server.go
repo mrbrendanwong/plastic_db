@@ -542,7 +542,7 @@ func MonitorCoordinator() {
 				}
 			}
 		}
-		time.Sleep(time.Duration(config.NodeSettings.VotingWait) * time.Millisecond)
+		time.Sleep(time.Duration(config.NodeSettings.HeartBeat) * time.Millisecond)
 	}
 }
 
