@@ -82,7 +82,7 @@ var (
 // For coordinator
 var (
 	allFailures AllFailures = AllFailures{nodes: make(map[string]*FailedNode)}
-	voteTimeout int64       = int64(time.Millisecond * 20000)
+	voteTimeout int64
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -268,6 +268,7 @@ func RegisterNode() (err error) {
 
 	// Store node settings from server
 	Settings = regInfo.Settings
+	voteTimeout = int64(time.Millisecond * time.Duration(Settings.VotingWait))
 	ID = regInfo.ID
 	isCoordinator = regInfo.IsCoordinator
 
@@ -295,7 +296,15 @@ func GetNodes() (err error) {
 			}
 		}
 	}
+
+	// Add self to allNodes map
 	AddSelfToMap()
+
+	// Ask coordinator for values in kvstore
+	if !isCoordinator {
+		GetValuesFromCoordinator()
+	}
+
 	return nil
 }
 
@@ -311,6 +320,7 @@ func AddSelfToMap() {
 	allNodes.Unlock()
 }
 
+// Report node failure to coordinator
 func ReportNodeFailure(node *Node) {
 	info := &FailureInfo{
 		Failed:   node.Address,
@@ -318,13 +328,13 @@ func ReportNodeFailure(node *Node) {
 	}
 	var reply int
 
-	if _, ok := allNodes.nodes[Coordinator.Address.String()] ; !ok{
+	if _, ok := allNodes.nodes[Coordinator.Address.String()]; !ok {
 		ReportCoordinatorFailure(Coordinator)
 	}
 
 	err := Coordinator.NodeConn.Call("KVNode.ReportNodeFailure", &info, &reply)
 	if err != nil {
-		outLog.Println("Error reporting failure of node ", node.ID, "[", node.Address ,"].  Report coordinator failure.")
+		outLog.Println("Error reporting failure of node ", node.ID, "[", node.Address, "].  Report coordinator failure.")
 		ReportCoordinatorFailure(Coordinator)
 	}
 }
@@ -358,7 +368,7 @@ func ReportCoordinatorFailure(node *Node) {
 	var reply int
 	err = Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
 	if err != nil {
-		outLog.Println("Error reporting failure of coordinator ", node.ID, "[",node.Address, "]")
+		outLog.Println("Error reporting failure of coordinator ", node.ID, "[", node.Address, "]")
 	} else {
 		coordinatorFailed = true
 	}
@@ -375,11 +385,10 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 
 	allNodes.Lock()
 	if Coordinator != nil {
-		if _, ok := allNodes.nodes[Coordinator.Address.String()] ; ok {
+		if _, ok := allNodes.nodes[Coordinator.Address.String()]; ok {
 			delete(allNodes.nodes, Coordinator.Address.String())
 		}
 	}
-
 
 	if addr.String() == LocalAddr.String() {
 		outLog.Println("I am the new coordinator!")
@@ -448,9 +457,42 @@ func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
 	return nil
 }
 
+// Request KVstore values from the coordinator
+func GetValuesFromCoordinator() {
+	var unused int
+	var reply map[string]string
+
+	outLog.Println("Requesting map values from coordinator...")
+
+	err := Coordinator.NodeConn.Call("KVNode.RequestValues", unused, &reply)
+	if err != nil {
+		outLog.Printf("Could not retrieve kvstore values from coordinator: %s\n", err)
+	}
+
+	kvstore.Lock()
+	kvstore.store = reply
+	kvstore.Unlock()
+
+	kvstore.RLock()
+	outLog.Printf("This is the map:%v\n", kvstore.store)
+	kvstore.RUnlock()
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+
+// Return kvstore to requesting node
+func (n KVNode) RequestValues(unused int, reply *map[string]string) error {
+	if !isCoordinator {
+		handleErrorFatal("Network node attempting to run coordinator node function.", nil)
+	}
+	outLog.Println("Coordinator retrieving majority values for new node...")
+	kvstore.RLock()
+	*reply = kvstore.store
+	kvstore.RUnlock()
+	return nil
+}
 
 // Report to server as coordinator
 func ReportForCoordinatorDuty(serverAddr string) {
@@ -547,7 +589,7 @@ func UpdateOnlineNodes() {
 		} else {
 			//outLog.Println("Server's map of online nodes updated...")
 		}
-		time.Sleep(5 * time.Second)
+		time.Sleep(time.Duration(Settings.ServerUpdateInterval) * time.Millisecond)
 	}
 }
 
@@ -622,7 +664,7 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 	quorum := getQuorumNum()
 
 	// if time window has passed, and quorum not reached, failure is considered invalid
-	for time.Now().UnixNano() < timestamp+voteTimeout { //TODO: put timeout in config file
+	for time.Now().UnixNano() < timestamp+voteTimeout {
 		allFailures.RLock()
 		if len(allFailures.nodes[failureAddr.String()].reporters) >= quorum {
 			outLog.Println("Quorum votes on failure reached for ", failureAddr.String())
@@ -674,7 +716,7 @@ func RemoveNode(node net.Addr) {
 		}
 		err := n.NodeConn.Call("KVNode.NodeFailureAlert", &args, &reply)
 		if err != nil {
-			outLog.Println("Failure broadcast failed to ", n.ID, "[" , n.Address ,"]")
+			outLog.Println("Failure broadcast failed to ", n.ID, "[", n.Address, "]")
 		}
 	}
 
@@ -685,17 +727,18 @@ func RemoveNode(node net.Addr) {
 	}
 }
 
-// Returns quorum: num nodes / 2 + 1
+// Returns quorum: num nodes / 2 + 1 or 1 if num nodes == 2
 func getQuorumNum() int {
 	if !isCoordinator {
 		handleErrorFatal("Not a network node function.", nil)
 	}
 	allNodes.RLock()
 	defer allNodes.RUnlock()
-	if len(allNodes.nodes) <= 2 {
+	size := len(allNodes.nodes)/2 + 1
+	if size <= 2 {
 		return 1
 	}
-	return len(allNodes.nodes)/2 + 1
+	return size
 }
 
 // Vote for who they think should be the new coordinator
@@ -725,7 +768,7 @@ func voteNewCoordinator() net.Addr {
 		}
 	}
 
-	outLog.Println("Voting for ", lowestID, "[", vote , "] as new coordinator.")
+	outLog.Println("Voting for ", lowestID, "[", vote, "] as new coordinator.")
 	return vote
 }
 
@@ -738,6 +781,8 @@ func (n KVNode) SendHeartbeat(unused_args *int, reply *int64) error {
 ////////////////////////////////////////////////////////////////////////////////
 // COORDINATOR NODE <-> NODE FUNCTION
 ////////////////////////////////////////////////////////////////////////////////
+
+// Read request to coordinator
 func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 	outLog.Println("Coordinator received read operation")
 
@@ -783,7 +828,6 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 
 	// Find value with majority and set in local kvstore
 	// If no majority value exists, return success - false
-	// TODO send out decision to all nodes or only nodes that don't have this value
 	var results []string
 	largestCount := 0
 	for val, count := range valuesMap {
@@ -944,11 +988,16 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 
 	// Check if majority of writes suceeded
 	threshold := Settings.MajorityThreshold
-	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	var successRatio float32
+	if len(allNodes.nodes) > 1 {
+		successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
+	} else {
+		successRatio = 1
+	}
 	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold {
+	if successRatio > threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Back up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
@@ -959,9 +1008,9 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 		b, err := json.MarshalIndent(kvstore.store, "", "  ")
 		if err != nil {
-			fmt.Println("error:", err)
+			errLog.Println("error:", err)
 		}
-		fmt.Print(string(b))
+		outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 		*reply = OpReply{Success: true}
 	} else {
@@ -984,11 +1033,10 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 	b, err := json.MarshalIndent(kvstore.store, "", "  ")
 	if err != nil {
-		fmt.Println("error:", err)
+		errLog.Println("error:", err)
 	}
-	fmt.Print(string(b))
+	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
-	*reply = OpReply{Success: true}
 	*reply = OpReply{Success: true}
 
 	return nil
@@ -1027,11 +1075,16 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 
 	// Check if majority of deletes suceeded
 	threshold := Settings.MajorityThreshold
-	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	var successRatio float32
+	if len(allNodes.nodes) > 1 {
+		successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
+	} else {
+		successRatio = 1
+	}
 	outLog.Println("This is the delete success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold {
+	if successRatio > threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Delete from back-up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
@@ -1045,6 +1098,11 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 		}
 
 		outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+		b, err := json.MarshalIndent(kvstore.store, "", "  ")
+		if err != nil {
+			errLog.Println("error:", err)
+		}
+		outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 		*reply = OpReply{Success: true}
 	} else {
@@ -1070,6 +1128,11 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 		return dkvlib.NonexistentKeyError(key)
 	}
 	outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+	b, err := json.MarshalIndent(kvstore.store, "", "  ")
+	if err != nil {
+		errLog.Println("error:", err)
+	}
+	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 	*reply = OpReply{Success: true}
 
@@ -1173,7 +1236,7 @@ func (n KVNode) RegisterNode(args *NodeInfo, _unused *int) error {
 	conn, err := rpc.Dial("tcp", addr.String())
 
 	if err != nil {
-		outLog.Println("Return connection with node failed: ", id, "[", addr.String() ,"]")
+		outLog.Println("Return connection with node failed: ", id, "[", addr.String(), "]")
 		return err
 	}
 
@@ -1188,7 +1251,7 @@ func (n KVNode) RegisterNode(args *NodeInfo, _unused *int) error {
 		conn,
 	}
 	allNodes.Unlock()
-	outLog.Println("Return connection with node succeeded: ", id, "[", addr.String() ,"]")
+	outLog.Println("Return connection with node succeeded: ", id, "[", addr.String(), "]")
 
 	go sendHeartBeats(addr.String())
 
@@ -1208,7 +1271,7 @@ func sendHeartBeats(addr string) error {
 		}
 		err := allNodes.nodes[addr].NodeConn.Call("KVNode.ReceiveHeartBeats", &args, &reply)
 		if err != nil {
-			outLog.Println("Error sending heartbeats to", allNodes.nodes[addr].ID , "[", addr , "]")
+			outLog.Println("Error sending heartbeats to", allNodes.nodes[addr].ID, "[", addr, "]")
 
 		}
 		time.Sleep(time.Duration(Settings.HeartBeat) * time.Millisecond)
@@ -1228,7 +1291,7 @@ func (n KVNode) ReceiveHeartBeats(args *NodeInfo, _unused *int) (err error) {
 	}
 	allNodes.nodes[addr.String()].RecentHeartbeat = time.Now().UnixNano()
 
-	outLog.Println("Heartbeats received from Node ", id ,"[", addr , "]")
+	outLog.Println("Heartbeats received from Node ", id, "[", addr, "]")
 	return nil
 }
 
@@ -1246,6 +1309,7 @@ func main() {
 	}
 
 	serverAddr := args[1]
+
 	ConnectServer(serverAddr)
 
 }

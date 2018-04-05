@@ -73,6 +73,7 @@ var (
 	allNodes           AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	currentCoordinator Node
 	nextID             int = 0
+	lastUpdate         int64
 )
 
 // Variables for failures
@@ -80,7 +81,7 @@ var (
 	voteInPlace bool        /* block communication with client when true */
 	allFailures AllFailures = AllFailures{nodes: make(map[string]bool)}
 	allVotes    AllVotes    = AllVotes{votes: make(map[string]int)}
-	voteTimeout int64       = int64(time.Millisecond * 20000)
+	voteTimeout int64
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -221,7 +222,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	reporter := info.Reporter
 	voted := info.NewCoordinator
 
-	if currentCoordinator.Address.String() != failed.String(){
+	if currentCoordinator.Address.String() != failed.String() {
 		outLog.Println("Reported failure not coordinator, ignore.")
 		return InvalidFailureError(failed.String())
 	}
@@ -241,7 +242,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 		go DetectCoordinatorFailure(time.Now().UnixNano())
 
 	} else {
-		if _, ok := allFailures.nodes[reporter.String()] ; !ok {
+		if _, ok := allFailures.nodes[reporter.String()]; !ok {
 			outLog.Println("Reported failure of coordinator ", failed, " received from ", reporter)
 
 			// if coordinator failure report has not yet been received by this reporter,
@@ -262,11 +263,10 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 func DetectCoordinatorFailure(timestamp int64) {
 
 	var didFail bool = false
-	//quorum := getQuorumNum()
 
-	for time.Now().UnixNano() < timestamp + voteTimeout {
+	for time.Now().UnixNano() < timestamp+voteTimeout {
 		allFailures.RLock()
-		if len(allFailures.nodes) >= getQuorumNum() {
+		if len(allFailures.nodes) >= getQuorumNum()-1 { // coordinator does not take place in vote
 			//quorum reached, coordinator failed
 			didFail = true
 			allFailures.RUnlock()
@@ -276,10 +276,10 @@ func DetectCoordinatorFailure(timestamp int64) {
 	}
 
 	if !didFail {
-		// timeout, reports are invali
+		// timeout, reports are invalid
 		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
 		outLog.Println("Votes: ", len(allFailures.nodes))
-		outLog.Println("Quorum: ", getQuorumNum())
+		outLog.Println("Quorum: ", getQuorumNum()-1)
 
 		// clear map of failures ad votes
 		allFailures.nodes = make(map[string]bool)
@@ -291,12 +291,23 @@ func DetectCoordinatorFailure(timestamp int64) {
 		newCoordinatorAddr := ElectCoordinator()
 
 		var newCoordinator Node
+		var found bool = false
 		for _, node := range allNodes.nodes {
 			if node.Address.String() == newCoordinatorAddr {
+				found = true
 				node.IsCoordinator = true
 				newCoordinator = *node
 			}
 		}
+
+		if !found{
+			errLog.Println("Could not find coordinator:", newCoordinatorAddr, ".Re-elect.")
+			allVotes.Lock()
+			delete(allVotes.votes, newCoordinatorAddr)
+			allVotes.Unlock()
+			continue
+		}
+
 		outLog.Println("Quorum reports of coordinator reached.", newCoordinator.ID, "[", newCoordinator.Address, "]")
 
 		// Remove previous coordinator from all from list of nodes
@@ -342,6 +353,9 @@ func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error
 	allNodes.Lock()
 	allNodes.nodes = args
 	allNodes.Unlock()
+
+	// Update the last time the coordinator sent network info
+	lastUpdate = time.Now().UnixNano()
 	return nil
 }
 
@@ -384,7 +398,7 @@ func ElectCoordinator() string {
 		rand.Seed(time.Now().UnixNano())
 		index := rand.Intn(len(mostPopular) - 1)
 		electedCoordinator = mostPopular[index]
-		outLog.Println("Tie exists.  Randomly elected new coordinator: ")
+		outLog.Println("Tie exists.  Randomly elected new coordinator: ", electedCoordinator)
 		return electedCoordinator
 	}
 
@@ -400,7 +414,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 	conn, err := rpc.Dial("tcp", newCoordinator.Address.String())
 	if err != nil {
-		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[" , newCoordinator.Address, "]")
+		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[", newCoordinator.Address, "]")
 		return err
 	}
 
@@ -487,7 +501,7 @@ func getQuorumNum() int {
 	if len(allNodes.nodes) <= 2 {
 		return 1
 	}
-	return len(allNodes.nodes)/2 - 1
+	return len(allNodes.nodes)/2 + 1
 }
 
 func castVote(addr string) {
@@ -503,6 +517,46 @@ func castVote(addr string) {
 	outLog.Println("Vote for ", addr, " casted.")
 }
 
+// Remove all nodes in the server if no network updates have occurred in a while
+func MonitorCoordinator() {
+	for {
+		if lastUpdate != 0 {
+			currentTime := time.Now().UnixNano()
+
+			if currentTime-lastUpdate > int64(time.Duration(config.NodeSettings.VotingWait)*time.Millisecond) && !voteInPlace {
+				allNodes.RLock()
+				size := len(allNodes.nodes)
+				allNodes.RUnlock()
+
+				if size == 1 {
+					outLog.Println("No updates received from coordinator. Purging network info from server...")
+					allNodes.Lock()
+					allNodes.nodes = make(map[string]*Node)
+					allNodes.Unlock()
+					lastUpdate = 0
+				} else {
+					// Within election period, if no election takes place, purge everything
+					allgood := false
+					for time.Now().UnixNano() < currentTime+voteTimeout {
+						if time.Now().UnixNano()-lastUpdate < int64(5*time.Second) || voteInPlace {
+							allgood = true
+							break
+						}
+					}
+					if !allgood {
+						outLog.Println("No updates received from coordinator. Purging network info from server...")
+						allNodes.Lock()
+						allNodes.nodes = make(map[string]*Node)
+						allNodes.Unlock()
+						lastUpdate = 0
+					}
+				}
+			}
+		}
+		time.Sleep(time.Duration(config.NodeSettings.HeartBeat) * time.Millisecond)
+	}
+}
+
 func main() {
 	gob.Register(&net.TCPAddr{})
 
@@ -515,6 +569,7 @@ func main() {
 	}
 
 	readConfigOrDie(*path)
+	voteTimeout = int64(time.Duration(config.NodeSettings.VotingWait) * time.Millisecond)
 
 	rand.Seed(time.Now().UnixNano())
 
@@ -527,6 +582,8 @@ func main() {
 
 	handleErrorFatal("listen error", e)
 	outLog.Printf("Server started. Receiving on %s\n", config.ServerAddress)
+
+	go MonitorCoordinator()
 
 	for {
 		conn, _ := l.Accept()
