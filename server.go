@@ -290,12 +290,23 @@ func DetectCoordinatorFailure(timestamp int64) {
 		newCoordinatorAddr := ElectCoordinator()
 
 		var newCoordinator Node
+		var found bool = false
 		for _, node := range allNodes.nodes {
 			if node.Address.String() == newCoordinatorAddr {
+				found = true
 				node.IsCoordinator = true
 				newCoordinator = *node
 			}
 		}
+
+		if !found{
+			errLog.Println("Could not find coordinator:", newCoordinatorAddr, ".Re-elect.")
+			allVotes.Lock()
+			delete(allVotes.votes, newCoordinatorAddr)
+			allVotes.Unlock()
+			continue
+		}
+
 		outLog.Println("Quorum reports of coordinator reached.", newCoordinator.ID, "[", newCoordinator.Address, "]")
 
 		// Remove previous coordinator from all from list of nodes
