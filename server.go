@@ -73,6 +73,7 @@ var (
 	allNodes           AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	currentCoordinator Node
 	nextID             int = 0
+	lastUpdate         int64
 )
 
 // Variables for failures
@@ -342,6 +343,9 @@ func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error
 	allNodes.Lock()
 	allNodes.nodes = args
 	allNodes.Unlock()
+
+	// Update the last time the coordinator sent network info
+	lastUpdate = time.Now().UnixNano()
 	return nil
 }
 
@@ -494,6 +498,46 @@ func castVote(addr string) {
 	outLog.Println("Vote for ", addr, " casted.")
 }
 
+// Remove all nodes in the server if no network updates have occurred in a while
+func MonitorCoordinator() {
+	for {
+		if lastUpdate != 0 {
+            currentTime := time.Now().UnixNano()
+
+			if currentTime - lastUpdate > int64(5 * time.Second) && !voteInPlace {
+                allNodes.RLock()
+                size := len(allNodes.nodes)
+                allNodes.RUnlock()
+
+                if size == 1{
+                    outLog.Println("No updates received from coordinator. Purging network info from server...")
+                    allNodes.Lock()
+                    allNodes.nodes = make(map[string]*Node)
+                    allNodes.Unlock()
+                    lastUpdate = 0
+                } else {
+                    // Within election period, if no election takes place, purge everything
+                    allgood := false
+                    for time.Now().UnixNano() < currentTime+voteTimeout {
+                        if time.Now().UnixNano() - lastUpdate < int64(5 * time.Second) || voteInPlace {
+                            allgood = true
+                            break;
+                        }
+                    }
+                    if !allgood {
+                        outLog.Println("No updates received from coordinator. Purging network info from server...")
+                        allNodes.Lock()
+                        allNodes.nodes = make(map[string]*Node)
+                        allNodes.Unlock()
+                        lastUpdate = 0
+                    }
+                }
+            }
+		}
+        time.Sleep(4 * time.Second)
+	}
+}
+
 func main() {
 	gob.Register(&net.TCPAddr{})
 
@@ -518,6 +562,8 @@ func main() {
 
 	handleErrorFatal("listen error", e)
 	outLog.Printf("Server started. Receiving on %s\n", config.ServerAddress)
+
+	go MonitorCoordinator()
 
 	for {
 		conn, _ := l.Accept()
