@@ -49,6 +49,12 @@ func (e InvalidFailureError) Error() string {
 	return fmt.Sprintf("Server: Failure Alert invalid. Ignoring. [%s]", string(e))
 }
 
+type InvalidPermissionsError string
+
+func (e InvalidPermissionsError) Error() string {
+	return fmt.Sprintf("Node: Network node attempting to take on Coordinator task [%s]", string(e))
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // TYPES, VARIABLES, CONSTANTS
 ////////////////////////////////////////////////////////////////////////////////
@@ -396,6 +402,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 
 	// election complete, new coordinator elected
 	coordinatorFailed = false
+	Server.Close()
 	return nil
 }
 
@@ -461,6 +468,55 @@ func ReportForCoordinatorDuty(serverAddr string) {
 	go UpdateOnlineNodes()
 }
 
+// Attempt to reconnect
+func ReconnectServer(serverAddr string) (err error) {
+	var conn *rpc.Client
+	if !isCoordinator {
+		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()))
+		return err
+	}
+
+	var RETRY_COUNT int = 5
+
+	for i := 0 ; i < RETRY_COUNT ; i++ {
+		outLog.Println("Reconnecting for the ", i, "time")
+		conn, err = rpc.Dial("tcp", serverAddr)
+		if err == nil{
+			outLog.Println("Reconnection succeeded.")
+			Server = conn
+			return nil
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	return err
+}
+
+// Resign from coordinator role
+func CoordinatorResign(){
+	if !isCoordinator {
+		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()))
+		return
+	}
+
+	// Tell all network nodes to start vote
+	for _, node := range allNodes.nodes {
+		if node.Address == LocalAddr {
+			continue
+		}
+
+		args := &FailureInfo{
+			Reporter:LocalAddr,
+			Failed:LocalAddr,
+		}
+		var reply int
+		err := node.NodeConn.Call("KVNode.CoordinatorResign", &args, &reply)
+		if err != nil {
+			errLog.Println("Could not tell node coordinator is resigning. ", node.ID, "[", node.Address, "]")
+		}
+	}
+}
+
 // Report connected nodes to server
 func UpdateOnlineNodes() {
 	for {
@@ -482,6 +538,12 @@ func UpdateOnlineNodes() {
 		err := Server.Call("KVServer.GetOnlineNodes", nodeMap, &unused)
 		if err != nil {
 			outLog.Printf("Could not send online nodes to server: %s\n", err)
+
+			if ReconnectServer(ServerAddr) != nil {
+				CoordinatorResign()
+				return
+			}
+
 		} else {
 			//outLog.Println("Server's map of online nodes updated...")
 		}
@@ -494,7 +556,7 @@ func SaveNodeFailure(node *Node) {
 	addr := node.Address
 
 	if !isCoordinator {
-		handleErrorFatal("Network node attempting to run coordinator node function.", nil)
+		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()) )
 	}
 	allFailures.Lock()
 	if node, ok := allFailures.nodes[addr.String()]; ok {
@@ -1011,6 +1073,28 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 
 	*reply = OpReply{Success: true}
 
+	return nil
+}
+
+// Notice that the coordinator has resigned
+func (n KVNode) CoordinatorResign(args *FailureInfo, _unused *int) error {
+	failedCoordinator := args.Failed
+
+	if failedCoordinator.String() == Coordinator.Address.String() {
+		outLog.Println("Coordinator resignation received.  Voting on new coordinator.")
+		ReportCoordinatorFailure(Coordinator)
+	} else {
+		outLog.Println("We do not have the updated coordinator.  Updating, then voting on new coordinator.")
+
+		allNodes.RLock()
+		for _, node := range allNodes.nodes {
+			if node.Address.String() == failedCoordinator.String() {
+				Coordinator = node
+				ReportCoordinatorFailure(Coordinator)
+			}
+		}
+		allNodes.RUnlock()
+	}
 	return nil
 }
 
