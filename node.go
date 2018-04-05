@@ -262,6 +262,7 @@ func RegisterNode() (err error) {
 
 	// Store node settings from server
 	Settings = regInfo.Settings
+	voteTimeout = int64(time.Millisecond * time.Duration(Settings.VotingWait))
 	ID = regInfo.ID
 	isCoordinator = regInfo.IsCoordinator
 
@@ -1224,7 +1225,7 @@ func main() {
 	}
 
 	serverAddr := args[1]
-	voteTimeout = int64(time.Millisecond * time.Duration(Settings.VotingWait))
+
 	ConnectServer(serverAddr)
 
 }
