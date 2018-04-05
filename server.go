@@ -447,7 +447,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 		conn, err := rpc.Dial("tcp", node.Address.String())
 		if err != nil {
 			errLog.Println("Error sending new coordinator to ", node.ID, "[", node.Address, "]")
-			break
+			continue
 		}
 
 		args := NodeInfo{
