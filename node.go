@@ -926,11 +926,16 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 
 	// Check if majority of writes suceeded
 	threshold := Settings.MajorityThreshold
-	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	var successRatio float32
+	if len(allNodes.nodes) > 1 {
+			successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
+		} else {
+			successRatio = 1
+		}
 	outLog.Println("This is the write success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold || len(allNodes.nodes) == 1 {
+	if successRatio > threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Back up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
@@ -941,9 +946,9 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 		b, err := json.MarshalIndent(kvstore.store, "", "  ")
 		if err != nil {
-			fmt.Println("error:", err)
+			errLog.Println("error:", err)
 		}
-		fmt.Print(string(b))
+		outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 		*reply = OpReply{Success: true}
 	} else {
@@ -966,11 +971,10 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
 	b, err := json.MarshalIndent(kvstore.store, "", "  ")
 	if err != nil {
-		fmt.Println("error:", err)
+		errLog.Println("error:", err)
 	}
-	fmt.Print(string(b))
+	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
-	*reply = OpReply{Success: true}
 	*reply = OpReply{Success: true}
 
 	return nil
@@ -1009,11 +1013,16 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 
 	// Check if majority of deletes suceeded
 	threshold := Settings.MajorityThreshold
-	successRatio := float32(successes) / float32(len(allNodes.nodes))
+	var successRatio float32
+	if len(allNodes.nodes) > 1 {
+			successRatio = float32(successes) / float32(len(allNodes.nodes)-1)
+		} else {
+			successRatio = 1
+		}
 	outLog.Println("This is the delete success ratio:", successRatio)
 
 	// Update coordinator
-	if successRatio >= threshold || len(allNodes.nodes) == 1 {
+	if successRatio > threshold || len(allNodes.nodes) == 1 {
 		outLog.Println("Delete from back-up is successful! Updating coordinator KV store...")
 		kvstore.Lock()
 		defer kvstore.Unlock()
@@ -1027,6 +1036,11 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 		}
 
 		outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+		b, err := json.MarshalIndent(kvstore.store, "", "  ")
+		if err != nil {
+			errLog.Println("error:", err)
+		}
+		outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 		*reply = OpReply{Success: true}
 	} else {
@@ -1052,6 +1066,11 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 		return dkvlib.NonexistentKeyError(key)
 	}
 	outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+	b, err := json.MarshalIndent(kvstore.store, "", "  ")
+	if err != nil {
+		errLog.Println("error:", err)
+	}
+	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 	*reply = OpReply{Success: true}
 
