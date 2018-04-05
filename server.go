@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/DistributedClocks/GoVector/govec"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -63,9 +65,10 @@ func (e InvalidFailureError) Error() string {
 
 // Variables related to general server function
 var (
-	config Config
-	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	config       Config
+	errLog       *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog       *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	ServerLogger *govec.GoLog
 )
 
 // Variables related to nodes
@@ -105,7 +108,7 @@ type NodeSettings struct {
 	VotingWait           uint32  `json:"voting-wait"`
 	ElectionWait         uint32  `json:"election-wait"`
 	ServerUpdateInterval uint32  `json:"server-update-interval"`
-	ReconnectionAttempts int	 `json:"reconnection-attempts"`
+	ReconnectionAttempts int     `json:"reconnection-attempts"`
 	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
@@ -124,14 +127,16 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
-	ID      string
-	Address net.Addr
+	ID         string
+	Address    net.Addr
+	LoggerInfo []byte
 }
 
 type CoordinatorFailureInfo struct {
 	Failed         net.Addr
 	Reporter       net.Addr
 	NewCoordinator net.Addr
+	LoggerInfo     []byte
 }
 
 type AllFailures struct {
@@ -223,6 +228,12 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	reporter := info.Reporter
 	voted := info.NewCoordinator
 
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	ServerLogger.UnpackReceive("[Server] Node reported coordinator failure", info.LoggerInfo, &reply)
+
 	if currentCoordinator.Address.String() != failed.String() {
 		outLog.Println("Reported failure not coordinator, ignore.")
 		return InvalidFailureError(failed.String())
@@ -301,7 +312,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 			}
 		}
 
-		if !found{
+		if !found {
 			errLog.Println("Could not find coordinator:", newCoordinatorAddr, ".Re-elect.")
 			allVotes.Lock()
 			delete(allVotes.votes, newCoordinatorAddr)
@@ -425,6 +436,8 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 	}
 
 	var reply int
+	sendingMsg := ServerLogger.PrepareSend("[Server] Broadcast new Coordinator", args)
+	args.LoggerInfo = sendingMsg
 	err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 	if err != nil {
 		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[", newCoordinator.Address, "]")
@@ -455,6 +468,9 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 			ID:      newCoordinator.ID,
 		}
 		var reply int
+
+		sendingMsg2 := ServerLogger.PrepareSend("[Server] Broadcast new Coordinator", args)
+		args.LoggerInfo = sendingMsg2
 
 		err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 		if err != nil {
@@ -559,6 +575,8 @@ func MonitorCoordinator() {
 }
 
 func main() {
+	ServerLogger = govec.InitGoVector("[Server]", "LogFile-Server")
+
 	gob.Register(&net.TCPAddr{})
 
 	path := flag.String("c", "", "Path to the JSON config")

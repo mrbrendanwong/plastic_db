@@ -147,8 +147,9 @@ type FailedNode struct {
 }
 
 type NodeInfo struct {
-	ID      string
-	Address net.Addr
+	ID         string
+	Address    net.Addr
+	LoggerInfo []byte
 }
 
 type FailureInfo struct {
@@ -160,6 +161,7 @@ type CoordinatorFailureInfo struct {
 	Failed         net.Addr
 	Reporter       net.Addr
 	NewCoordinator net.Addr
+	LoggerInfo     []byte
 }
 
 // For RPC Calls
@@ -284,12 +286,9 @@ func RegisterNode() (err error) {
 	if isCoordinator {
 		outLog.Printf("Received node ID %s and this node is the coordinator!", ID)
 		goVectorCoordinatorLogger = govec.InitGoVector("Coordinator", "LogFile"+ID)
-		goVectorCoordinatorLogger.LogThis("[Coordinator] Initialized", "Coordinator", string(goVectorCoordinatorLogger.GetCurrentVC()))
 	} else {
 		outLog.Printf("Received node ID %s and this node is a network node", ID)
 		goVectorNetworkNodeLogger = govec.InitGoVector("Node"+ID, "LogFile"+ID)
-		goVectorNetworkNodeLogger.LogThis("[Coordinator] Initialized", "Coordinator", string(goVectorNetworkNodeLogger.GetCurrentVC()))
-
 	}
 
 	return nil
@@ -380,6 +379,10 @@ func ReportCoordinatorFailure(node *Node) {
 	}
 
 	var reply int
+
+	sending := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Reporting Coordinator Failure", info)
+	info.LoggerInfo = sending
+	fmt.Printf("%v", info)
 	err = Server.Call("KVServer.ReportCoordinatorFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of coordinator ", node.ID, "[", node.Address, "]")
@@ -390,6 +393,11 @@ func ReportCoordinatorFailure(node *Node) {
 
 // Save the new coordinator
 func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] received new Coordinator", args.LoggerInfo, &reply)
 	addr := args.Address
 	outLog.Println("Received new coordinator... ")
 
@@ -408,8 +416,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 		outLog.Println("I am the new coordinator!")
 		allNodes.nodes[addr.String()].IsCoordinator = true
 		isCoordinator = true
-		goVectorCoordinatorLogger = govec.InitGoVector("[Coordinator]", "LogFile"+ID)
-		goVectorCoordinatorLogger.LogThis("[Coordinator] Initialized", "Coordinator", string(goVectorCoordinatorLogger.GetCurrentVC()))
+		goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] I am the new coordinator")
 		ReportForCoordinatorDuty(ServerAddr)
 	} else {
 		if _, ok := allNodes.nodes[addr.String()]; ok {
@@ -1101,7 +1108,7 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 				outLog.Println("Could not delete from node ", err)
 			}
 
-			goVectorCoordinatorLogger.UnpackReceive("[Coordinator]: Receiving Ack/Nack from node", nodeReply.LoggerInfo, &OpReply{})
+			goVectorCoordinatorLogger.UnpackReceive("[Coordinator]: Receiving Ack/Nack from node", nodeReply.LoggerInfo, &DeleteRequest{})
 
 			// Record successes
 			if nodeReply.Success {
