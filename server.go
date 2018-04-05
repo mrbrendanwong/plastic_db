@@ -80,7 +80,7 @@ var (
 	voteInPlace bool        /* block communication with client when true */
 	allFailures AllFailures = AllFailures{nodes: make(map[string]bool)}
 	allVotes    AllVotes    = AllVotes{votes: make(map[string]int)}
-	voteTimeout int64       = int64(time.Millisecond * 20000)
+	voteTimeout int64
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -221,7 +221,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	reporter := info.Reporter
 	voted := info.NewCoordinator
 
-	if currentCoordinator.Address.String() != failed.String(){
+	if currentCoordinator.Address.String() != failed.String() {
 		outLog.Println("Reported failure not coordinator, ignore.")
 		return InvalidFailureError(failed.String())
 	}
@@ -241,7 +241,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 		go DetectCoordinatorFailure(time.Now().UnixNano())
 
 	} else {
-		if _, ok := allFailures.nodes[reporter.String()] ; !ok {
+		if _, ok := allFailures.nodes[reporter.String()]; !ok {
 			outLog.Println("Reported failure of coordinator ", failed, " received from ", reporter)
 
 			// if coordinator failure report has not yet been received by this reporter,
@@ -263,9 +263,9 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 	var didFail bool = false
 
-	for time.Now().UnixNano() < timestamp + voteTimeout {
+	for time.Now().UnixNano() < timestamp+voteTimeout {
 		allFailures.RLock()
-		if len(allFailures.nodes) >= getQuorumNum() - 1 {		// coordinator does not take place in vote
+		if len(allFailures.nodes) >= getQuorumNum()-1 { // coordinator does not take place in vote
 			//quorum reached, coordinator failed
 			didFail = true
 			allFailures.RUnlock()
@@ -275,10 +275,10 @@ func DetectCoordinatorFailure(timestamp int64) {
 	}
 
 	if !didFail {
-		// timeout, reports are invali
+		// timeout, reports are invalid
 		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
 		outLog.Println("Votes: ", len(allFailures.nodes))
-		outLog.Println("Quorum: ", getQuorumNum() - 1)
+		outLog.Println("Quorum: ", getQuorumNum()-1)
 
 		// clear map of failures ad votes
 		allFailures.nodes = make(map[string]bool)
@@ -399,7 +399,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 	conn, err := rpc.Dial("tcp", newCoordinator.Address.String())
 	if err != nil {
-		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[" , newCoordinator.Address, "]")
+		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[", newCoordinator.Address, "]")
 		return err
 	}
 
@@ -514,6 +514,7 @@ func main() {
 	}
 
 	readConfigOrDie(*path)
+	voteTimeout = int64(time.Duration(config.NodeSettings.VotingWait) * time.Millisecond)
 
 	rand.Seed(time.Now().UnixNano())
 
