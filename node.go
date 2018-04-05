@@ -106,6 +106,7 @@ type NodeSettings struct {
 	VotingWait           uint32  `json:"voting-wait"`
 	ElectionWait         uint32  `json:"election-wait"`
 	ServerUpdateInterval uint32  `json:"server-update-interval"`
+	ReconnectionAttempts int	 `json:"reconnection-attempts"`
 	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
@@ -518,10 +519,10 @@ func ReconnectServer(serverAddr string) (err error) {
 		return err
 	}
 
-	var RETRY_COUNT int = 5
+	var numAttempts = Settings.ReconnectionAttempts
 
-	for i := 0 ; i < RETRY_COUNT ; i++ {
-		outLog.Println("Reconnecting for the ", i, "time")
+	for i := 0 ; i < numAttempts ; i++ {
+		outLog.Println("Attempting to reconnect to server for the ", i, "time")
 		conn, err = rpc.Dial("tcp", serverAddr)
 		if err == nil{
 			outLog.Println("Reconnection succeeded.")
@@ -540,6 +541,7 @@ func CoordinatorResign(){
 		handleErrorFatal("Not a network node function.", InvalidPermissionsError(LocalAddr.String()))
 		return
 	}
+	outLog.Println("Cannot connect to server.  I am resigning from the coordinator role!")
 
 	// Tell all network nodes to start vote
 	for _, node := range allNodes.nodes {

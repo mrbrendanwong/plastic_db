@@ -105,6 +105,7 @@ type NodeSettings struct {
 	VotingWait           uint32  `json:"voting-wait"`
 	ElectionWait         uint32  `json:"election-wait"`
 	ServerUpdateInterval uint32  `json:"server-update-interval"`
+	ReconnectionAttempts int	 `json:"reconnection-attempts"`
 	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
