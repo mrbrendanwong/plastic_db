@@ -412,7 +412,6 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 
 	// election complete, new coordinator elected
 	coordinatorFailed = false
-	Server.Close()
 	return nil
 }
 
