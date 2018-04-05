@@ -284,9 +284,12 @@ func RegisterNode() (err error) {
 	if isCoordinator {
 		outLog.Printf("Received node ID %s and this node is the coordinator!", ID)
 		goVectorCoordinatorLogger = govec.InitGoVector("Coordinator", "LogFile"+ID)
+		goVectorCoordinatorLogger.LogThis("[Coordinator] Initialized", "Coordinator", string(goVectorCoordinatorLogger.GetCurrentVC()))
 	} else {
 		outLog.Printf("Received node ID %s and this node is a network node", ID)
 		goVectorNetworkNodeLogger = govec.InitGoVector("Node"+ID, "LogFile"+ID)
+		goVectorNetworkNodeLogger.LogThis("[Coordinator] Initialized", "Coordinator", string(goVectorNetworkNodeLogger.GetCurrentVC()))
+
 	}
 
 	return nil
@@ -406,6 +409,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 		allNodes.nodes[addr.String()].IsCoordinator = true
 		isCoordinator = true
 		goVectorCoordinatorLogger = govec.InitGoVector("[Coordinator]", "LogFile"+ID)
+		goVectorCoordinatorLogger.LogThis("[Coordinator] Initialized", "Coordinator", string(goVectorCoordinatorLogger.GetCurrentVC()))
 		ReportForCoordinatorDuty(ServerAddr)
 	} else {
 		if _, ok := allNodes.nodes[addr.String()]; ok {
@@ -820,10 +824,15 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 			nodeArgs := args
 			nodeReply := ReadReply{}
 
+			//GoVector Logging Prepare a Message
+			sendingMsg := goVectorCoordinatorLogger.PrepareSend("[Coordinator] Sending Read from Coordinator to Node", nodeArgs)
+			nodeArgs.LoggerInfo = sendingMsg
 			err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
 			if err != nil {
 				outLog.Println("Could not reach node ", node.ID)
 			}
+
+			goVectorCoordinatorLogger.UnpackReceive("[Coordinator] Receive Ack/Nack from Node", nodeReply.LoggerInfo, &ReadReply{})
 
 			// Record successes
 			if !nodeReply.Success {
@@ -953,6 +962,8 @@ func addToValuesMap(valuesMap map[string]int, val string) {
 }
 
 func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
+	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+" ]: Receiving Read from Coordinator", args.LoggerInfo, &ReadRequest{})
+
 	outLog.Println("Node received Read operation")
 	kvstore.RLock()
 	val, ok := kvstore.store[args.Key]
@@ -961,9 +972,11 @@ func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
 	if !ok {
 		reply.Success = false
 		reply.Value = ""
+		goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
 	} else {
 		reply.Success = true
 		reply.Value = val
+		goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
 	}
 	return nil
 }
