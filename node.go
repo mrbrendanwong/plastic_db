@@ -64,7 +64,6 @@ func (e InvalidPermissionsError) Error() string {
 var (
 	errLog                    *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
 	outLog                    *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	goVectorCoordinatorLogger *govec.GoLog
 	goVectorNetworkNodeLogger *govec.GoLog
 )
 
@@ -127,6 +126,7 @@ type SmallNode struct {
 	ID            string
 	IsCoordinator bool
 	Address       net.Addr
+	LoggerInfo    []byte
 }
 
 // All Nodes
@@ -153,8 +153,9 @@ type NodeInfo struct {
 }
 
 type FailureInfo struct {
-	Failed   net.Addr
-	Reporter net.Addr
+	Failed     net.Addr
+	Reporter   net.Addr
+	LoggerInfo []byte
 }
 
 type CoordinatorFailureInfo struct {
@@ -268,9 +269,13 @@ func ConnectServer(serverAddr string) {
 
 // Registers a node to the server and receives a node ID
 func RegisterNode() (err error) {
+	goVectorNetworkNodeLogger = govec.InitGoVector("Node"+LocalAddr.String(), "LogFile"+LocalAddr.String())
 	var regInfo RegistrationPackage
 
 	nodeInfo := NodeInfo{Address: LocalAddr}
+
+	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Node joined the network, send Register to Server", nodeInfo)
+	nodeInfo.LoggerInfo = sendingMsg
 	err = Server.Call("KVServer.RegisterNode", nodeInfo, &regInfo)
 	if err != nil {
 		outLog.Println("Something bad happened:", err)
@@ -285,10 +290,10 @@ func RegisterNode() (err error) {
 
 	if isCoordinator {
 		outLog.Printf("Received node ID %s and this node is the coordinator!", ID)
-		goVectorCoordinatorLogger = govec.InitGoVector("Coordinator", "LogFile"+ID)
+		goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] I am the coordinator!")
 	} else {
 		outLog.Printf("Received node ID %s and this node is a network node", ID)
-		goVectorNetworkNodeLogger = govec.InitGoVector("Node"+ID, "LogFile"+ID)
+		goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] I am a network node!")
 	}
 
 	return nil
@@ -303,9 +308,12 @@ func GetNodes() (err error) {
 		outLog.Println("Error getting existing nodes from server")
 	} else {
 		outLog.Println("Connecting to the other nodes...")
-		for _, node := range nodeSet {
-			if node.Address.String() != LocalAddr.String() {
-				ConnectNode(node)
+		for id, node := range nodeSet {
+			if id != "LoggerInfo" {
+				if node.Address.String() != LocalAddr.String() {
+					node.ID = id
+					ConnectNode(node)
+				}
 			}
 		}
 	}
@@ -345,6 +353,8 @@ func ReportNodeFailure(node *Node) {
 		ReportCoordinatorFailure(Coordinator)
 	}
 
+	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Reporting a node failure to Coordinator", info)
+	info.LoggerInfo = sendingMsg
 	err := Coordinator.NodeConn.Call("KVNode.ReportNodeFailure", &info, &reply)
 	if err != nil {
 		outLog.Println("Error reporting failure of node ", node.ID, "[", node.Address, "].  Report coordinator failure.")
@@ -468,6 +478,11 @@ func MonitorHeartBeats(addr string) {
 
 // Broadcast of node failure from coordinator
 func (n KVNode) NodeFailureAlert(node *NodeInfo, _unused *int) error {
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] Received confirmed Node failure report", node.LoggerInfo, &reply)
 	outLog.Println(" Node failure alert received from coordinator:  ", node.ID, "[", node.Address, "]")
 
 	allNodes.Lock()
@@ -600,6 +615,10 @@ func UpdateOnlineNodes() {
 			}
 		}
 
+		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Coordinator sends update of nodes to Server", nodeMap)
+		nodeMap["LoggerInfo"] = &SmallNode{
+			LoggerInfo: sendingMsg,
+		}
 		err := Server.Call("KVServer.GetOnlineNodes", nodeMap, &unused)
 		if err != nil {
 			outLog.Printf("Could not send online nodes to server: %s\n", err)
@@ -645,6 +664,12 @@ func SaveNodeFailure(node *Node) {
 func (n KVNode) ReportNodeFailure(info *FailureInfo, _unused *int) error {
 	failure := info.Failed
 	reporter := info.Reporter
+
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] Coordinator received node failure report", info.LoggerInfo, &reply)
 
 	outLog.Println("Failed node ", failure, " detected by ", reporter)
 
@@ -717,6 +742,7 @@ func DetectFailure(failureAddr net.Addr, timestamp int64) {
 
 // Remove node from network
 func RemoveNode(node net.Addr) {
+	goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] Quorum for Node failure reached by coordinator")
 	outLog.Println("Removing ", node)
 	allNodes.Lock()
 	if _, ok := allNodes.nodes[node.String()]; ok {
@@ -737,6 +763,8 @@ func RemoveNode(node net.Addr) {
 			// Do not send notice to self
 			continue
 		}
+		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Coordinator sends failed node confirmation to all nodes", args)
+		args.LoggerInfo = sendingMsg
 		err := n.NodeConn.Call("KVNode.NodeFailureAlert", &args, &reply)
 		if err != nil {
 			outLog.Println("Failure broadcast failed to ", n.ID, "[", n.Address, "]")
@@ -832,14 +860,14 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 			nodeReply := ReadReply{}
 
 			//GoVector Logging Prepare a Message
-			sendingMsg := goVectorCoordinatorLogger.PrepareSend("[Coordinator] Sending Read from Coordinator to Node", nodeArgs)
+			sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Coordinator sending Read to Node", nodeArgs)
 			nodeArgs.LoggerInfo = sendingMsg
 			err := node.NodeConn.Call("KVNode.NodeRead", nodeArgs, &nodeReply)
 			if err != nil {
 				outLog.Println("Could not reach node ", node.ID)
 			}
 
-			goVectorCoordinatorLogger.UnpackReceive("[Coordinator] Receive Ack/Nack from Node", nodeReply.LoggerInfo, &ReadReply{})
+			goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] Coordinator receives Ack/Nack from Node", nodeReply.LoggerInfo, &ReadReply{})
 
 			// Record successes
 			if !nodeReply.Success {
@@ -1005,13 +1033,13 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 			nodeReply := OpReply{}
 
 			//GoVector Logging Prepare a Message
-			sendingMsg := goVectorCoordinatorLogger.PrepareSend("[Coordinator] Sending Write from Coordinator to Node", nodeArgs)
+			sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Coordinator sending Write to Node", nodeArgs)
 			nodeArgs.LoggerInfo = sendingMsg
 			err := node.NodeConn.Call("KVNode.NodeWrite", nodeArgs, &nodeReply)
 			if err != nil {
 				outLog.Println("Could not write to node ", err)
 			}
-			goVectorCoordinatorLogger.UnpackReceive("[Coordinator]: Receiving Ack/Nack from node", nodeReply.LoggerInfo, &OpReply{})
+			goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] Coordinator receives Ack/Nack from node", nodeReply.LoggerInfo, &OpReply{})
 
 			// Record successes
 			if nodeReply.Success {
@@ -1023,7 +1051,7 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 		}
 	}
 
-	goVectorCoordinatorLogger.LogLocalEvent("[Coordinator Node] Done writing to all nodes")
+	goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] Coordinator done writing to all nodes")
 
 	// Check if majority of writes suceeded
 	threshold := Settings.MajorityThreshold
@@ -1100,7 +1128,7 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 			nodeArgs := args
 			nodeReply := OpReply{}
 			//GoVector Logging Prepare a Message
-			sendingMsg := goVectorCoordinatorLogger.PrepareSend("[Coordinator] Sending Delete from Coordinator to Node", nodeArgs)
+			sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Coordinator sending Delete to Node", nodeArgs)
 			nodeArgs.LoggerInfo = sendingMsg
 
 			err := node.NodeConn.Call("KVNode.NodeDelete", nodeArgs, &nodeReply)
@@ -1108,7 +1136,7 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 				outLog.Println("Could not delete from node ", err)
 			}
 
-			goVectorCoordinatorLogger.UnpackReceive("[Coordinator]: Receiving Ack/Nack from node", nodeReply.LoggerInfo, &DeleteRequest{})
+			goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] Coordinator receiving Ack/Nack from node", nodeReply.LoggerInfo, &DeleteRequest{})
 
 			// Record successes
 			if nodeReply.Success {
@@ -1121,7 +1149,7 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 
 	}
 
-	goVectorCoordinatorLogger.LogLocalEvent("[Coordinator Node] Done Deleting from all nodes")
+	goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] Coordinator done Deleting from all nodes")
 
 	// Check if majority of deletes suceeded
 	threshold := Settings.MajorityThreshold

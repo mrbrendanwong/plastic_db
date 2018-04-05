@@ -100,6 +100,7 @@ type RegistrationPackage struct {
 	Settings      NodeSettings
 	ID            string
 	IsCoordinator bool
+	LoggerInfo    []byte
 }
 
 // Node Settings
@@ -118,6 +119,7 @@ type SmallNode struct {
 	ID            string
 	IsCoordinator bool
 	Address       net.Addr
+	LoggerInfo    []byte
 }
 
 // All Nodes - a map containing all nodes, including the coordinator
@@ -158,6 +160,7 @@ type KVServer int
 
 // Register a node into the KV node network
 func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage) error {
+	ServerLogger.UnpackReceive("[Server] Add node to map", nodeInfo.LoggerInfo, &RegistrationPackage{})
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -362,6 +365,11 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 // Receive map of online nodes from coordinator
 func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error) {
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	ServerLogger.UnpackReceive("[Coordinator] Receive list of online nodes", args["LoggerInfo"].LoggerInfo, &reply)
 	allNodes.Lock()
 	allNodes.nodes = args
 	allNodes.Unlock()
