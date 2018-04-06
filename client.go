@@ -123,7 +123,7 @@ func main() {
 
 	// Call functions on API
 	outLog.Println("----------------- TEST: Write value -----------------")
-	err = coordinator.Write("a", "7")
+	err = coordinator.Write("b", "7")
 	if err != nil {
 		outLog.Println(err)
 	} else {
@@ -131,7 +131,7 @@ func main() {
 	}
 
 	outLog.Println("----------------- TEST: Read existing key -----------------")
-	val, error := coordinator.Read("a")
+	val, error := coordinator.Read("b")
 	if error != nil {
 		outLog.Println(error)
 	} else {
@@ -139,7 +139,7 @@ func main() {
 	}
 
 	outLog.Println("----------------- TEST: Delete existing key -----------------")
-	err = coordinator.Delete("a")
+	err = coordinator.Delete("b")
 	if err != nil {
 		outLog.Println(err)
 	} else {

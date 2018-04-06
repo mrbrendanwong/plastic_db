@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/DistributedClocks/GoVector/govec"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -63,9 +65,10 @@ func (e InvalidFailureError) Error() string {
 
 // Variables related to general server function
 var (
-	config Config
-	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	config       Config
+	errLog       *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog       *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	ServerLogger *govec.GoLog
 )
 
 // Variables related to nodes
@@ -73,6 +76,7 @@ var (
 	allNodes           AllNodes = AllNodes{nodes: make(map[string]*Node)}
 	currentCoordinator Node
 	nextID             int = 0
+	lastUpdate         int64
 )
 
 // Variables for failures
@@ -80,7 +84,7 @@ var (
 	voteInPlace bool        /* block communication with client when true */
 	allFailures AllFailures = AllFailures{nodes: make(map[string]bool)}
 	allVotes    AllVotes    = AllVotes{votes: make(map[string]int)}
-	voteTimeout int64       = int64(time.Millisecond * 20000)
+	voteTimeout int64
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -96,6 +100,7 @@ type RegistrationPackage struct {
 	Settings      NodeSettings
 	ID            string
 	IsCoordinator bool
+	LoggerInfo    []byte
 }
 
 // Node Settings
@@ -104,6 +109,7 @@ type NodeSettings struct {
 	VotingWait           uint32  `json:"voting-wait"`
 	ElectionWait         uint32  `json:"election-wait"`
 	ServerUpdateInterval uint32  `json:"server-update-interval"`
+	ReconnectionAttempts int     `json:"reconnection-attempts"`
 	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
@@ -113,6 +119,7 @@ type SmallNode struct {
 	ID            string
 	IsCoordinator bool
 	Address       net.Addr
+	LoggerInfo    []byte
 }
 
 // All Nodes - a map containing all nodes, including the coordinator
@@ -122,14 +129,16 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
-	ID      string
-	Address net.Addr
+	ID         string
+	Address    net.Addr
+	LoggerInfo []byte
 }
 
 type CoordinatorFailureInfo struct {
 	Failed         net.Addr
 	Reporter       net.Addr
 	NewCoordinator net.Addr
+	LoggerInfo     []byte
 }
 
 type AllFailures struct {
@@ -151,6 +160,7 @@ type KVServer int
 
 // Register a node into the KV node network
 func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage) error {
+	ServerLogger.UnpackReceive("[Server] Add node to map", nodeInfo.LoggerInfo, &RegistrationPackage{})
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -221,7 +231,13 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	reporter := info.Reporter
 	voted := info.NewCoordinator
 
-	if currentCoordinator.Address.String() != failed.String(){
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	ServerLogger.UnpackReceive("[Server] Node reported coordinator failure", info.LoggerInfo, &reply)
+
+	if currentCoordinator.Address.String() != failed.String() {
 		outLog.Println("Reported failure not coordinator, ignore.")
 		return InvalidFailureError(failed.String())
 	}
@@ -241,7 +257,7 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 		go DetectCoordinatorFailure(time.Now().UnixNano())
 
 	} else {
-		if _, ok := allFailures.nodes[reporter.String()] ; !ok {
+		if _, ok := allFailures.nodes[reporter.String()]; !ok {
 			outLog.Println("Reported failure of coordinator ", failed, " received from ", reporter)
 
 			// if coordinator failure report has not yet been received by this reporter,
@@ -263,9 +279,9 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 	var didFail bool = false
 
-	for time.Now().UnixNano() < timestamp + voteTimeout {
+	for time.Now().UnixNano() < timestamp+voteTimeout {
 		allFailures.RLock()
-		if len(allFailures.nodes) >= getQuorumNum() - 1 {		// coordinator does not take place in vote
+		if len(allFailures.nodes) >= getQuorumNum()-1 { // coordinator does not take place in vote
 			//quorum reached, coordinator failed
 			didFail = true
 			allFailures.RUnlock()
@@ -275,10 +291,10 @@ func DetectCoordinatorFailure(timestamp int64) {
 	}
 
 	if !didFail {
-		// timeout, reports are invali
+		// timeout, reports are invalid
 		outLog.Println("Detecting coordinator failure timed out.  Failure reports invalid.")
 		outLog.Println("Votes: ", len(allFailures.nodes))
-		outLog.Println("Quorum: ", getQuorumNum() - 1)
+		outLog.Println("Quorum: ", getQuorumNum()-1)
 
 		// clear map of failures ad votes
 		allFailures.nodes = make(map[string]bool)
@@ -291,7 +307,10 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 		var newCoordinator Node
 		var found bool = false
-		for _, node := range allNodes.nodes {
+		for id, node := range allNodes.nodes {
+			if id == "LoggerInfo" {
+				continue
+			}
 			if node.Address.String() == newCoordinatorAddr {
 				found = true
 				node.IsCoordinator = true
@@ -299,7 +318,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 			}
 		}
 
-		if !found{
+		if !found {
 			errLog.Println("Could not find coordinator:", newCoordinatorAddr, ".Re-elect.")
 			allVotes.Lock()
 			delete(allVotes.votes, newCoordinatorAddr)
@@ -349,9 +368,17 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 // Receive map of online nodes from coordinator
 func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error) {
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	ServerLogger.UnpackReceive("[Coordinator] Receive list of online nodes", args["LoggerInfo"].LoggerInfo, &reply)
 	allNodes.Lock()
 	allNodes.nodes = args
 	allNodes.Unlock()
+
+	// Update the last time the coordinator sent network info
+	lastUpdate = time.Now().UnixNano()
 	return nil
 }
 
@@ -361,7 +388,10 @@ func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error
 
 func ElectCoordinator() string {
 	allNodes.RLock()
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if _, ok := allVotes.votes[node.Address.String()]; !ok {
 			allVotes.Lock()
 			allVotes.votes[node.Address.String()] = 0
@@ -410,7 +440,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 
 	conn, err := rpc.Dial("tcp", newCoordinator.Address.String())
 	if err != nil {
-		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[" , newCoordinator.Address, "]")
+		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[", newCoordinator.Address, "]")
 		return err
 	}
 
@@ -420,6 +450,8 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 	}
 
 	var reply int
+	sendingMsg := ServerLogger.PrepareSend("[Server] Broadcast new Coordinator", args)
+	args.LoggerInfo = sendingMsg
 	err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 	if err != nil {
 		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[", newCoordinator.Address, "]")
@@ -434,7 +466,10 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 	// Broadcast to all other nodes
 	allNodes.RLock()
 	defer allNodes.RUnlock()
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if node.Address.String() == currentCoordinator.Address.String() || node.Address.String() == newCoordinator.Address.String() {
 			continue
 		}
@@ -442,7 +477,7 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 		conn, err := rpc.Dial("tcp", node.Address.String())
 		if err != nil {
 			errLog.Println("Error sending new coordinator to ", node.ID, "[", node.Address, "]")
-			break
+			continue
 		}
 
 		args := NodeInfo{
@@ -450,6 +485,9 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 			ID:      newCoordinator.ID,
 		}
 		var reply int
+
+		sendingMsg2 := ServerLogger.PrepareSend("[Server] Broadcast new Coordinator", args)
+		args.LoggerInfo = sendingMsg2
 
 		err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 		if err != nil {
@@ -513,7 +551,49 @@ func castVote(addr string) {
 	outLog.Println("Vote for ", addr, " casted.")
 }
 
+// Remove all nodes in the server if no network updates have occurred in a while
+func MonitorCoordinator() {
+	for {
+		if lastUpdate != 0 {
+			currentTime := time.Now().UnixNano()
+
+			if currentTime-lastUpdate > int64(time.Duration(config.NodeSettings.VotingWait)*time.Millisecond) && !voteInPlace {
+				allNodes.RLock()
+				size := len(allNodes.nodes)
+				allNodes.RUnlock()
+
+				if size == 1 {
+					outLog.Println("No updates received from coordinator. Purging network info from server...")
+					allNodes.Lock()
+					allNodes.nodes = make(map[string]*Node)
+					allNodes.Unlock()
+					lastUpdate = 0
+				} else {
+					// Within election period, if no election takes place, purge everything
+					allgood := false
+					for time.Now().UnixNano() < currentTime+voteTimeout {
+						if time.Now().UnixNano()-lastUpdate < int64(5*time.Second) || voteInPlace {
+							allgood = true
+							break
+						}
+					}
+					if !allgood {
+						outLog.Println("No updates received from coordinator. Purging network info from server...")
+						allNodes.Lock()
+						allNodes.nodes = make(map[string]*Node)
+						allNodes.Unlock()
+						lastUpdate = 0
+					}
+				}
+			}
+		}
+		time.Sleep(time.Duration(config.NodeSettings.HeartBeat) * time.Millisecond)
+	}
+}
+
 func main() {
+	ServerLogger = govec.InitGoVector("Server", "LogFile-Server")
+
 	gob.Register(&net.TCPAddr{})
 
 	path := flag.String("c", "", "Path to the JSON config")
@@ -525,6 +605,7 @@ func main() {
 	}
 
 	readConfigOrDie(*path)
+	voteTimeout = int64(time.Duration(config.NodeSettings.VotingWait) * time.Millisecond)
 
 	rand.Seed(time.Now().UnixNano())
 
@@ -537,6 +618,8 @@ func main() {
 
 	handleErrorFatal("listen error", e)
 	outLog.Printf("Server started. Receiving on %s\n", config.ServerAddress)
+
+	go MonitorCoordinator()
 
 	for {
 		conn, _ := l.Accept()
