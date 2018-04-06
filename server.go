@@ -24,6 +24,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/DistributedClocks/GoVector/govec"
 )
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -63,9 +65,10 @@ func (e InvalidFailureError) Error() string {
 
 // Variables related to general server function
 var (
-	config Config
-	errLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
-	outLog *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	config       Config
+	errLog       *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	outLog       *log.Logger = log.New(os.Stderr, "[serv] ", log.Lshortfile|log.LUTC|log.Lmicroseconds)
+	ServerLogger *govec.GoLog
 )
 
 // Variables related to nodes
@@ -97,6 +100,7 @@ type RegistrationPackage struct {
 	Settings      NodeSettings
 	ID            string
 	IsCoordinator bool
+	LoggerInfo    []byte
 }
 
 // Node Settings
@@ -105,7 +109,7 @@ type NodeSettings struct {
 	VotingWait           uint32  `json:"voting-wait"`
 	ElectionWait         uint32  `json:"election-wait"`
 	ServerUpdateInterval uint32  `json:"server-update-interval"`
-	ReconnectionAttempts int	 `json:"reconnection-attempts"`
+	ReconnectionAttempts int     `json:"reconnection-attempts"`
 	MajorityThreshold    float32 `json:"majority-threshold"`
 }
 
@@ -115,6 +119,7 @@ type SmallNode struct {
 	ID            string
 	IsCoordinator bool
 	Address       net.Addr
+	LoggerInfo    []byte
 }
 
 // All Nodes - a map containing all nodes, including the coordinator
@@ -124,14 +129,16 @@ type AllNodes struct {
 }
 
 type NodeInfo struct {
-	ID      string
-	Address net.Addr
+	ID         string
+	Address    net.Addr
+	LoggerInfo []byte
 }
 
 type CoordinatorFailureInfo struct {
 	Failed         net.Addr
 	Reporter       net.Addr
 	NewCoordinator net.Addr
+	LoggerInfo     []byte
 }
 
 type AllFailures struct {
@@ -153,6 +160,7 @@ type KVServer int
 
 // Register a node into the KV node network
 func (s *KVServer) RegisterNode(nodeInfo NodeInfo, settings *RegistrationPackage) error {
+	ServerLogger.UnpackReceive("[Server] Add node to map", nodeInfo.LoggerInfo, &RegistrationPackage{})
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
@@ -222,6 +230,12 @@ func (s KVServer) ReportCoordinatorFailure(info *CoordinatorFailureInfo, _unused
 	failed := info.Failed
 	reporter := info.Reporter
 	voted := info.NewCoordinator
+
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	ServerLogger.UnpackReceive("[Server] Node reported coordinator failure", info.LoggerInfo, &reply)
 
 	if currentCoordinator.Address.String() != failed.String() {
 		outLog.Println("Reported failure not coordinator, ignore.")
@@ -301,7 +315,7 @@ func DetectCoordinatorFailure(timestamp int64) {
 			}
 		}
 
-		if !found{
+		if !found {
 			errLog.Println("Could not find coordinator:", newCoordinatorAddr, ".Re-elect.")
 			allVotes.Lock()
 			delete(allVotes.votes, newCoordinatorAddr)
@@ -351,6 +365,11 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 // Receive map of online nodes from coordinator
 func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error) {
+	reply := struct {
+		unused     int
+		LoggerInfo []byte
+	}{}
+	ServerLogger.UnpackReceive("[Coordinator] Receive list of online nodes", args["LoggerInfo"].LoggerInfo, &reply)
 	allNodes.Lock()
 	allNodes.nodes = args
 	allNodes.Unlock()
@@ -425,6 +444,8 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 	}
 
 	var reply int
+	sendingMsg := ServerLogger.PrepareSend("[Server] Broadcast new Coordinator", args)
+	args.LoggerInfo = sendingMsg
 	err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 	if err != nil {
 		errLog.Println("Error connecting to new coordinator", newCoordinator.ID, "[", newCoordinator.Address, "]")
@@ -455,6 +476,9 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 			ID:      newCoordinator.ID,
 		}
 		var reply int
+
+		sendingMsg2 := ServerLogger.PrepareSend("[Server] Broadcast new Coordinator", args)
+		args.LoggerInfo = sendingMsg2
 
 		err = conn.Call("KVNode.NewCoordinator", &args, &reply)
 		if err != nil {
@@ -559,6 +583,8 @@ func MonitorCoordinator() {
 }
 
 func main() {
+	ServerLogger = govec.InitGoVector("Server", "LogFile-Server")
+
 	gob.Register(&net.TCPAddr{})
 
 	path := flag.String("c", "", "Path to the JSON config")

@@ -88,25 +88,30 @@ type CNode struct {
 ////////////////////////////////////////////////////////////////////////////////
 
 type ReadRequest struct {
-	Key string
+	Key        string
+	LoggerInfo []byte
 }
 
 type ReadReply struct {
-	Value   string
-	Success bool
+	Value      string
+	Success    bool
+	LoggerInfo []byte
 }
 
 type WriteRequest struct {
-	Key   string
-	Value string
+	Key        string
+	Value      string
+	LoggerInfo []byte
 }
 
 type DeleteRequest struct {
-	Key string
+	Key        string
+	LoggerInfo []byte
 }
 
 type OpReply struct {
-	Success bool
+	Success    bool
+	LoggerInfo []byte
 }
 
 ///////////////////////////////////////////////////////////////////////////
