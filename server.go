@@ -307,7 +307,10 @@ func DetectCoordinatorFailure(timestamp int64) {
 
 		var newCoordinator Node
 		var found bool = false
-		for _, node := range allNodes.nodes {
+		for id, node := range allNodes.nodes {
+			if id == "LoggerInfo" {
+				continue
+			}
 			if node.Address.String() == newCoordinatorAddr {
 				found = true
 				node.IsCoordinator = true
@@ -385,7 +388,10 @@ func (s *KVServer) GetOnlineNodes(args map[string]*Node, unused *int) (err error
 
 func ElectCoordinator() string {
 	allNodes.RLock()
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if _, ok := allVotes.votes[node.Address.String()]; !ok {
 			allVotes.Lock()
 			allVotes.votes[node.Address.String()] = 0
@@ -460,7 +466,10 @@ func BroadcastCoordinator(newCoordinator Node) (err error) {
 	// Broadcast to all other nodes
 	allNodes.RLock()
 	defer allNodes.RUnlock()
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if node.Address.String() == currentCoordinator.Address.String() || node.Address.String() == newCoordinator.Address.String() {
 			continue
 		}

@@ -579,7 +579,11 @@ func CoordinatorResign() {
 	outLog.Println("Cannot connect to server.  I am resigning from the coordinator role!")
 
 	// Tell all network nodes to start vote
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
+
 		if node.Address == LocalAddr {
 			continue
 		}
@@ -757,7 +761,10 @@ func RemoveNode(node net.Addr) {
 	args := &NodeInfo{
 		Address: node,
 	}
-	for _, n := range allNodes.nodes {
+	for id, n := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if n.Address.String() == LocalAddr.String() {
 			// Do not send notice to self
 			continue
@@ -803,7 +810,10 @@ func voteNewCoordinator() net.Addr {
 	vote := LocalAddr
 
 	// Look for the node with the lowest ID
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if node.IsCoordinator {
 			continue // Do not vote for current coordinator
 		}
@@ -851,7 +861,10 @@ func (n KVNode) CoordinatorRead(args ReadRequest, reply *ReadReply) error {
 
 	allNodes.Lock()
 	outLog.Println("Attempting to read back-up nodes...")
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if !node.IsCoordinator {
 			outLog.Printf("Reading from node %s...\n", node.ID)
 
@@ -930,7 +943,10 @@ func sendWriteToNodes(key string, value string) {
 	allNodes.Lock()
 	defer allNodes.Unlock()
 
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if !node.IsCoordinator {
 			outLog.Printf("Writing to node %s...\n", node.ID)
 
@@ -960,7 +976,10 @@ func sendDeleteToNodes(key string) {
 	defer allNodes.Unlock()
 
 	// Attempt delete from backup nodes
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if !node.IsCoordinator {
 			outLog.Printf("Deleting from node %s...\n", node.ID)
 
@@ -1024,7 +1043,10 @@ func (n KVNode) CoordinatorWrite(args WriteRequest, reply *OpReply) error {
 	// Attempt to write to backup nodes
 	successes := 0
 	outLog.Println("Attempting to write to back-up nodes...")
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if !node.IsCoordinator {
 			outLog.Printf("Writing to node %s...\n", node.ID)
 
@@ -1120,7 +1142,10 @@ func (n KVNode) CoordinatorDelete(args DeleteRequest, reply *OpReply) error {
 	// Attempt delete from backup nodes
 	successes := 0
 	outLog.Println("Attempting to delete from back-up nodes...")
-	for _, node := range allNodes.nodes {
+	for id, node := range allNodes.nodes {
+		if id == "LoggerInfo" {
+			continue
+		}
 		if !node.IsCoordinator {
 			outLog.Printf("Deleting from node %s...\n", node.ID)
 
@@ -1231,7 +1256,10 @@ func (n KVNode) CoordinatorResign(args *FailureInfo, _unused *int) error {
 		outLog.Println("We do not have the updated coordinator.  Updating, then voting on new coordinator.")
 
 		allNodes.RLock()
-		for _, node := range allNodes.nodes {
+		for id, node := range allNodes.nodes {
+			if id == "LoggerInfo" {
+				continue
+			}
 			if node.Address.String() == failedCoordinator.String() {
 				Coordinator = node
 				ReportCoordinatorFailure(Coordinator)
