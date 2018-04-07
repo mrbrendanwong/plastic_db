@@ -15,7 +15,7 @@ The following is to utilize a basic test client to interact with the KV network
 client.go: `go run client.go [server ip:port]`
 
 The following is to utilize a client with CLI input commands to interact with the KV network
-client_proto.go `go run client.go [server ip:port] [cmd]`
+client_proto.go `go run client_proto.go [server ip:port] [cmd]`
 
 [cmd] is one of more of the following:
 | Command | Description |

@@ -4,7 +4,7 @@ For use in Project 2 of UBC CPSC 416 2017W2
 
 Usage:
 
-$ go run client.go [server ip:port]
+$ go run client_proto.go [server ip:port] [cmd]
 */
 
 package main
