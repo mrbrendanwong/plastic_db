@@ -311,7 +311,6 @@ func GetNodes() (err error) {
 		for id, node := range nodeSet {
 			if id != "LoggerInfo" {
 				if node.Address.String() != LocalAddr.String() {
-					node.ID = id
 					ConnectNode(node)
 				}
 			}
