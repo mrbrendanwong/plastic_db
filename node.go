@@ -688,6 +688,7 @@ func (n KVNode) ReportNodeFailure(info *FailureInfo, _unused *int) error {
 		allFailures.Unlock()
 	} else {
 		// Check that this node actually exists
+		allFailures.Unlock()
 		allNodes.RLock()
 		if _, ok := allNodes.nodes[failure.String()]; !ok {
 			outLog.Println("Node does not exist in network.  Ignoring failure report.")
