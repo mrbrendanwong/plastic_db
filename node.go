@@ -409,9 +409,7 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 	addr := args.Address
 	outLog.Println("Received new coordinator... ")
 
-	// TODO: TO TEST
-	// Uncomment to test case where new coordinator dies before rest of network knows its the new coordinator
-	//time.Sleep(5 * time.Second)
+
 
 	allNodes.Lock()
 	if Coordinator != nil {
@@ -419,26 +417,33 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 			delete(allNodes.nodes, Coordinator.Address.String())
 		}
 	}
+	allNodes.Unlock()
 
 	if addr.String() == LocalAddr.String() {
 		outLog.Println("I am the new coordinator!")
 		allNodes.nodes[addr.String()].IsCoordinator = true
 		isCoordinator = true
 		goVectorNetworkNodeLogger.LogLocalEvent("[Node" + ID + "] I am the new coordinator")
+		Server.Close()
 		ReportForCoordinatorDuty(ServerAddr)
 	} else {
+		// TODO: TO TEST
+		// Uncomment to test case where new coordinator dies before rest of network knows its the new coordinator
+		//time.Sleep(5 * time.Second)
+
 		if _, ok := allNodes.nodes[addr.String()]; ok {
 			outLog.Println("Node exists", addr.String())
 			allNodes.nodes[addr.String()].IsCoordinator = true
 			Coordinator = allNodes.nodes[addr.String()]
 			outLog.Println(Coordinator.ID, "[", Coordinator.Address, "]", " is the new coordinator.")
+			Server.Close()
 		} else {
 			outLog.Println("Node does not exist", addr.String())
+			Server.Close()
 			return err
 		}
 
 	}
-	allNodes.Unlock()
 
 	// election complete, new coordinator elected
 	coordinatorFailed = false
@@ -456,7 +461,6 @@ func MonitorHeartBeats(addr string) {
 		if _, ok := allNodes.nodes[addr]; ok {
 
 			if time.Now().UnixNano()-allNodes.nodes[addr].RecentHeartbeat > int64(Settings.HeartBeat)*int64(time.Millisecond) {
-				allNodes.RLock()
 				if isCoordinator {
 					SaveNodeFailure(allNodes.nodes[addr])
 				} else if allNodes.nodes[addr].IsCoordinator && coordinatorFailed == false {
@@ -464,7 +468,6 @@ func MonitorHeartBeats(addr string) {
 				} else {
 					ReportNodeFailure(allNodes.nodes[addr])
 				}
-				allNodes.RUnlock()
 			}
 		} else {
 			outLog.Println("Node not found in network. Stop monitoring heartbeats.", addr)
@@ -684,9 +687,11 @@ func (n KVNode) ReportNodeFailure(info *FailureInfo, _unused *int) error {
 		allFailures.Unlock()
 	} else {
 		// Check that this node actually exists
+		allFailures.Unlock()
 		allNodes.RLock()
 		if _, ok := allNodes.nodes[failure.String()]; !ok {
 			outLog.Println("Node does not exist in network.  Ignoring failure report.")
+			allNodes.RUnlock()
 			return InvalidFailureError(failure.String())
 		}
 
@@ -701,7 +706,7 @@ func (n KVNode) ReportNodeFailure(info *FailureInfo, _unused *int) error {
 			reporters: reporters,
 		}
 
-		allFailures.Unlock()
+		allNodes.RUnlock()
 
 		go DetectFailure(failure, allFailures.nodes[failure.String()].timestamp)
 	}
@@ -799,8 +804,6 @@ func getQuorumNum() int {
 
 // Vote for who they think should be the new coordinator
 func voteNewCoordinator() net.Addr {
-	allNodes.RLock()
-	defer allNodes.RUnlock()
 
 	lowestID, err := strconv.Atoi(ID) // get current node's id
 	if err != nil {
@@ -808,6 +811,8 @@ func voteNewCoordinator() net.Addr {
 	}
 	vote := LocalAddr
 
+	allNodes.RLock()
+	defer allNodes.RUnlock()
 	// Look for the node with the lowest ID
 	for id, node := range allNodes.nodes {
 		if id == "LoggerInfo" {
