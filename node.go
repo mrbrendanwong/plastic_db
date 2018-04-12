@@ -1453,10 +1453,12 @@ func main() {
 
 	serverAddr := args[1]
 
-	rejectOps := args[2]
+	if len(args > 2) {
+		rejectOps := args[2]
 
-	if rejectOps == "true" {
-		rejectFlag = true
+		if rejectOps == "true" {
+			rejectFlag = true
+		}
 	}
 
 	ConnectServer(serverAddr)
