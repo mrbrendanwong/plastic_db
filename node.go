@@ -1150,6 +1150,7 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 
 		*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 	} else {
+		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: false})
 		*reply = OpReply{Success: false, LoggerInfo: sendingMsg}
 	}
 
@@ -1271,6 +1272,7 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 
 		*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 	} else {
+		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: false})
 		*reply = OpReply{Success: false, LoggerInfo: sendingMsg}
 	}
 
