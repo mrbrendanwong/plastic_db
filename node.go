@@ -1027,10 +1027,12 @@ func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
 
 	kvstore.RUnlock()
 	if !ok {
+		time.Sleep(3 * time.Second)
 		reply.Success = false
 		reply.Value = ""
 		goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
 	} else {
+		time.Sleep(3 * time.Second)
 		reply.Success = true
 		reply.Value = val
 		goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
@@ -1132,6 +1134,8 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
+
+	time.Sleep(3 * time.Second)
 
 	*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 
@@ -1243,6 +1247,8 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
 	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
+
+	time.Sleep(3 * time.Second)
 
 	*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 
