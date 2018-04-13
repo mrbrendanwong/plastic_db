@@ -79,8 +79,6 @@ var (
 	ID                string
 	coordinatorFailed bool    = false
 	kvstore           KVStore = KVStore{store: make(map[string]string)}
-
-	rejectFlag 		  bool 	  = false
 )
 
 // For coordinator
@@ -322,11 +320,11 @@ func GetNodes() (err error) {
 	// Add self to allNodes map
 	AddSelfToMap()
 
-	// Ask coordinator for values in kvstore
-	if !isCoordinator {
-		GetValuesFromCoordinator()
-	}
-
+	kvstore.Lock()
+	kvstore.store["a"] = "0"
+	kvstore.store["b"] = "0"
+	kvstore.store["c"] = "0"
+	kvstore.Unlock()
 	return nil
 }
 
@@ -410,8 +408,6 @@ func (n KVNode) NewCoordinator(args *NodeInfo, _unused *int) (err error) {
 	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+"] received new Coordinator", args.LoggerInfo, &reply)
 	addr := args.Address
 	outLog.Println("Received new coordinator... ")
-
-
 
 	allNodes.Lock()
 	if Coordinator != nil {
@@ -1028,24 +1024,15 @@ func (n KVNode) NodeRead(args ReadRequest, reply *ReadReply) error {
 	val, ok := kvstore.store[args.Key]
 
 	kvstore.RUnlock()
-
-	if rejectFlag != true {
-		if !ok {
-			time.Sleep(3 * time.Second)
-			reply.Success = false
-			reply.Value = ""
-			goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
-		} else {
-			time.Sleep(3 * time.Second)
-			reply.Success = true
-			reply.Value = val
-			goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
-		}
-	} else {
+	if !ok {
 		reply.Success = false
 		reply.Value = ""
+		goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
+	} else {
+		reply.Success = true
+		reply.Value = val
+		goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+" ]: Sending Ack/Nack to Coordinator", reply)
 	}
-
 	return nil
 }
 
@@ -1129,32 +1116,22 @@ func (n KVNode) NodeWrite(args WriteRequest, reply *OpReply) error {
 	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+" ]: Receiving Write from Coordinator", args.LoggerInfo, &WriteRequest{})
 
 	outLog.Println("Received write request from coordinator!")
+	key := args.Key
+	value := args.Value
+	kvstore.Lock()
+	defer kvstore.Unlock()
 
-	if rejectFlag != true {
-		key := args.Key
-		value := args.Value
-		kvstore.Lock()
-		defer kvstore.Unlock()
-
-		kvstore.store[key] = value
-		outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
-		b, err := json.MarshalIndent(kvstore.store, "", "  ")
-		if err != nil {
-			errLog.Println("error:", err)
-		}
-		outLog.Printf("Current KV mappings:\n%s\n", string(b))
-
-		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
-
-		time.Sleep(3 * time.Second)
-
-		*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
-	} else {
-		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: false})
-		*reply = OpReply{Success: false, LoggerInfo: sendingMsg}
+	kvstore.store[key] = value
+	outLog.Printf("(%s, %s) successfully written to the KV store!\n", key, kvstore.store[key])
+	b, err := json.MarshalIndent(kvstore.store, "", "  ")
+	if err != nil {
+		errLog.Println("error:", err)
 	}
+	outLog.Printf("Current KV mappings:\n%s\n", string(b))
 
+	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
 
+	*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 
 	return nil
 }
@@ -1245,36 +1222,27 @@ func (n KVNode) NodeDelete(args DeleteRequest, reply *OpReply) error {
 	goVectorNetworkNodeLogger.UnpackReceive("[Node"+ID+" ]: Receiving Delete from Coordinator", args.LoggerInfo, &DeleteRequest{})
 
 	outLog.Println("Received delete request from coordinator!")
+	kvstore.Lock()
+	defer kvstore.Unlock()
 
-	if rejectFlag != true {
-		kvstore.Lock()
-		defer kvstore.Unlock()
-
-		key := args.Key
-		value := kvstore.store[key]
-
-		if _, ok := kvstore.store[key]; ok {
-			delete(kvstore.store, key)
-		} else {
-			outLog.Printf("Key %s does not exist in store!\n", key)
-			return dkvlib.NonexistentKeyError(key)
-		}
-		outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
-		b, err := json.MarshalIndent(kvstore.store, "", "  ")
-		if err != nil {
-			errLog.Println("error:", err)
-		}
-		outLog.Printf("Current KV mappings:\n%s\n", string(b))
-
-		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
-
-		time.Sleep(3 * time.Second)
-
-		*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
+	key := args.Key
+	value := kvstore.store[key]
+	if _, ok := kvstore.store[key]; ok {
+		delete(kvstore.store, key)
 	} else {
-		sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: false})
-		*reply = OpReply{Success: false, LoggerInfo: sendingMsg}
+		outLog.Printf("Key %s does not exist in store!\n", key)
+		return dkvlib.NonexistentKeyError(key)
 	}
+	outLog.Printf("(%s, %s) successfully deleted from KV store!\n", key, value)
+	b, err := json.MarshalIndent(kvstore.store, "", "  ")
+	if err != nil {
+		errLog.Println("error:", err)
+	}
+	outLog.Printf("Current KV mappings:\n%s\n", string(b))
+
+	sendingMsg := goVectorNetworkNodeLogger.PrepareSend("[Node"+ID+"] Returning ack or nack to coordinator", OpReply{Success: true})
+
+	*reply = OpReply{Success: true, LoggerInfo: sendingMsg}
 
 	return nil
 }
@@ -1446,20 +1414,12 @@ func main() {
 	gob.Register(&net.TCPAddr{})
 
 	args := os.Args
-	if len(args) < 2 {
+	if len(args) != 2 {
 		fmt.Println("Usage: go run node.go [server ip:port]")
 		return
 	}
 
 	serverAddr := args[1]
-
-	if len(args) > 2 {
-		rejectOps := args[2]
-
-		if rejectOps == "true" {
-			rejectFlag = true
-		}
-	}
 
 	ConnectServer(serverAddr)
 
